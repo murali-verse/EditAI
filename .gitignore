@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# Frontend
+node_modules/
+dist/
+
+# Generated media and output
+media/
+exports/
+projects/
+*.mp4
+*.mov
+*.wav
+*.mp3
+
+# Local databases
+*.db
