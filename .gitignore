@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 venv/
 .env
+ryt/
+
 
 # Frontend
 node_modules/
