@@ -4,256 +4,255 @@
 EditAI Assistant — Integrated DaVinci Resolve AI Chatbot (In-App Script)
 =============================================================================
 Runs directly inside DaVinci Resolve using the built-in Fusion UIManager.
-Available under: Workspace -> Scripts -> EditAI_Chatbot
+Available under: Workspace -> Scripts -> Edit -> EditAI_Chatbot
 """
 
 import sys
 import os
+import traceback
 
-# Ensure local modules can be loaded
-current_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Fusion\Scripts\Utility"
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+LOG_FILE = r"D:\Ryathon\davinci_chatbot_last_error.log"
 
-# Import automation controller & NLP engine
-try:
-    from davinci_controller import DaVinciController
-    from davinci_nlp_engine import DaVinciNLPEngine
-except ImportError:
-    # Look in d:/Ryathon/davinci_integration
-    dev_path = r"D:\Ryathon\davinci_integration"
-    if dev_path not in sys.path:
-        sys.path.insert(0, dev_path)
-    from davinci_controller import DaVinciController
-    from davinci_nlp_engine import DaVinciNLPEngine
-
-# Obtain resolve & fusion instances
-if 'resolve' not in globals() or not hasattr(resolve, 'GetVersion'):
+def log_msg(msg):
     try:
-        import DaVinciResolveScript as dvr_script
-        resolve = dvr_script.scriptapp("Resolve")
-    except Exception as e:
-        resolve = None
-
-if 'fusion' not in globals() or not fusion:
-    if resolve:
-        fusion = resolve.Fusion()
-
-if 'bmd' not in globals() or not bmd:
-    try:
-        import DaVinciResolveScript as bmd
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
     except Exception:
         pass
 
-# Initialize Controller and NLP Engine
-controller = DaVinciController(resolve)
-nlp_engine = DaVinciNLPEngine(controller)
+try:
+    log_msg("--- Launching EditAI_Chatbot.py ---")
 
-# Setup UI Manager
-ui = fusion.UIManager
-dispatcher = bmd.UIDispatcher(ui)
+    # Add directories to sys.path
+    script_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else ""
+    dev_dir = r"D:\Ryathon\davinci_integration"
+    modules_dir = r"C:\ProgramData\Blackmagic Design\DaVinci Resolve\Support\Developer\Scripting\Modules"
 
-winID = "com.editai.davinci.integrated_chatbot"
+    for p in [script_dir, dev_dir, modules_dir]:
+        if p and p not in sys.path and os.path.exists(p):
+            sys.path.insert(0, p)
 
-# Check if an instance already exists
-existing_win = ui.FindWindow(winID)
-if existing_win:
-    existing_win.Show()
-    existing_win.Raise()
-    sys.exit()
+    # Resolve environment variables for external fallback
+    lib_path = r"C:\Program Files\Blackmagic Design\DaVinci Resolve\fusionscript.dll"
+    if os.path.exists(lib_path):
+        os.environ["RESOLVE_SCRIPT_LIB"] = lib_path
 
-# Element IDs
-HEADER_ID = "HeaderLabel"
-STATUS_ID = "StatusLabel"
-HISTORY_ID = "ChatHistory"
-INPUT_ID = "UserInput"
-SEND_BTN_ID = "SendBtn"
-CLEAR_BTN_ID = "ClearBtn"
+    # Obtain bmd module
+    if 'bmd' not in globals() or not globals()['bmd']:
+        try:
+            import DaVinciResolveScript as bmd
+        except Exception as e:
+            log_msg(f"Could not import DaVinciResolveScript: {e}")
+            bmd = None
+    else:
+        bmd = globals()['bmd']
 
-# Quick Action IDs
-PAGE_EDIT_ID = "PageEdit"
-PAGE_COLOR_ID = "PageColor"
-PAGE_DELIVER_ID = "PageDeliver"
-AI_CUTS_ID = "AiCuts"
-AI_SUBS_ID = "AiSubs"
-AI_VOICE_ID = "AiVoice"
-SAVE_ID = "SaveProject"
+    # Obtain resolve instance
+    if 'resolve' not in globals() or not globals()['resolve']:
+        try:
+            if bmd:
+                resolve = bmd.scriptapp("Resolve")
+            else:
+                resolve = None
+        except Exception as e:
+            log_msg(f"Could not get Resolve instance: {e}")
+            resolve = None
+    else:
+        resolve = globals()['resolve']
 
-# Title header HTML styling
-header_html = """
-<div style="background-color: #1a1e26; padding: 10px; border-radius: 6px; border: 1px solid #2d3748;">
-    <h2 style="color: #38bdf8; margin: 0; font-family: 'Segoe UI', sans-serif;">
-        EDITMIND AI &bull; DaVinci Resolve Co-Pilot
-    </h2>
-    <p style="color: #94a3b8; margin: 4px 0 0 0; font-size: 11px;">
-        Integrated AI Video Editing Chatbot &bull; Natural Language Control Engine
-    </p>
-</div>
-"""
+    # Obtain fusion instance
+    if 'fusion' not in globals() or not globals()['fusion']:
+        try:
+            if resolve:
+                fusion = resolve.Fusion()
+            elif bmd:
+                fusion = bmd.scriptapp("Fusion")
+            else:
+                fusion = None
+        except Exception as e:
+            log_msg(f"Could not get Fusion instance: {e}")
+            fusion = None
+    else:
+        fusion = globals()['fusion']
 
-def get_status_text():
-    summary = controller.get_project_summary()
-    if not summary.get("connected"):
-        return "<span style='color: #ef4444;'>&#9679; Resolve Disconnected</span>"
-    proj = summary.get("project_name", "No Project Open")
-    tl = summary.get("timeline_name", "No Active Timeline")
-    tc = summary.get("timeline_timecode", "N/A")
-    return (
-        f"<span style='color: #22c55e;'>&#9679; Connected</span> &nbsp;|&nbsp; "
-        f"<b>Project:</b> <span style='color: #f1f5f9;'>{proj}</span> &nbsp;|&nbsp; "
-        f"<b>Timeline:</b> <span style='color: #38bdf8;'>{tl}</span> &nbsp;|&nbsp; "
-        f"<b>TC:</b> <span style='color: #fbbf24;'>{tc}</span>"
+    if not fusion or not bmd:
+        err = f"Fatal: fusion={fusion}, bmd={bmd}. Cannot initialize Fusion UIManager."
+        log_msg(err)
+        print(err)
+        sys.exit(1)
+
+    log_msg("Acquired fusion and bmd instances successfully.")
+
+    # Import automation controller & NLP engine
+    from davinci_controller import DaVinciController
+    from davinci_nlp_engine import DaVinciNLPEngine
+
+    controller = DaVinciController(resolve)
+    nlp_engine = DaVinciNLPEngine(controller)
+
+    ui = fusion.UIManager
+    dispatcher = bmd.UIDispatcher(ui)
+
+    winID = "com.editai.davinci.integrated_chatbot"
+
+    # Single instance check
+    existing_win = ui.FindWindow(winID)
+    if existing_win:
+        existing_win.Show()
+        existing_win.Raise()
+        log_msg("Raised existing window instance.")
+        sys.exit()
+
+    # Widget IDs
+    STATUS_ID = "StatusLabel"
+    HISTORY_ID = "ChatHistory"
+    INPUT_ID = "PromptInput"
+    SEND_BTN_ID = "BtnSend"
+    CLEAR_BTN_ID = "BtnClear"
+
+    PAGE_EDIT_ID = "BtnEdit"
+    PAGE_COLOR_ID = "BtnColor"
+    PAGE_DELIVER_ID = "BtnDeliver"
+    AI_CUTS_ID = "BtnCuts"
+    AI_SUBS_ID = "BtnSubs"
+    AI_VOICE_ID = "BtnVoice"
+    SAVE_ID = "BtnSave"
+
+    def get_summary_text():
+        try:
+            summary = controller.get_project_summary()
+            if not summary.get("connected"):
+                return "Resolve Status: Disconnected"
+            proj = summary.get("project_name", "No Project Open")
+            tl = summary.get("timeline_name", "None")
+            tc = summary.get("timeline_timecode", "N/A")
+            return f"Project: {proj}  |  Timeline: {tl}  |  TC: {tc}"
+        except Exception as ex:
+            return f"Status: {ex}"
+
+    # Build Layout using standard Fusion UI containers
+    header_title = "<b><big>EditAI Assistant &bull; DaVinci Resolve 21 Co-Pilot</big></b>"
+
+    win = dispatcher.AddWindow({
+        'ID': winID,
+        'Geometry': [200, 150, 720, 620],
+        'WindowTitle': "EditAI Assistant — DaVinci Resolve 21",
+        },
+        ui.VGroup([
+            ui.Label({ 'Text': header_title, 'Weight': 0.05 }),
+            ui.Label({ 'ID': STATUS_ID, 'Text': get_summary_text(), 'Weight': 0.05 }),
+            
+            # Quick Actions Row
+            ui.HGroup({ 'Weight': 0 }, [
+                ui.Button({ 'ID': PAGE_EDIT_ID, 'Text': "Edit Page" }),
+                ui.Button({ 'ID': PAGE_COLOR_ID, 'Text': "Color Page" }),
+                ui.Button({ 'ID': PAGE_DELIVER_ID, 'Text': "Deliver Page" }),
+                ui.Button({ 'ID': AI_CUTS_ID, 'Text': "Detect Cuts" }),
+                ui.Button({ 'ID': AI_SUBS_ID, 'Text': "Auto Subtitles" }),
+                ui.Button({ 'ID': AI_VOICE_ID, 'Text': "Voice Iso" }),
+                ui.Button({ 'ID': SAVE_ID, 'Text': "Save Project" }),
+            ]),
+
+            ui.Label({ 'Text': "<b>Chat History & Execution Log:</b>", 'Weight': 0 }),
+            ui.TextEdit({
+                'ID': HISTORY_ID,
+                'ReadOnly': True,
+                'Weight': 0.65,
+                'Font': ui.Font({ 'Family': "Consolas", 'PixelSize': 12 })
+            }),
+
+            ui.Label({ 'Text': "<b>Enter Natural Language Command:</b>", 'Weight': 0 }),
+            ui.TextEdit({
+                'ID': INPUT_ID,
+                'Weight': 0.2,
+                'Font': ui.Font({ 'Family': "Consolas", 'PixelSize': 12 })
+            }),
+
+            ui.HGroup({ 'Weight': 0 }, [
+                ui.Button({ 'ID': SEND_BTN_ID, 'Text': "Execute Command (Send)" }),
+                ui.Button({ 'ID': CLEAR_BTN_ID, 'Text': "Clear Log" }),
+            ])
+        ])
     )
 
-# Build UI Layout
-win = dispatcher.AddWindow({
-    'ID': winID,
-    'Geometry': [250, 150, 800, 680],
-    'WindowTitle': "EditAI Assistant — DaVinci Resolve 21",
-},
-ui.VGroup({'Spacing': 8, 'Margin': 12}, [
-    # Header Banner
-    ui.Label({'ID': HEADER_ID, 'Text': header_html, 'Weight': 0}),
-    
-    # Live Status Bar
-    ui.Label({'ID': STATUS_ID, 'Text': get_status_text(), 'Weight': 0}),
+    log_msg("Window created successfully.")
 
-    # Quick Action Toolbar
-    ui.HGroup({'Weight': 0, 'Spacing': 5}, [
-        ui.Label({'Text': "<b>Quick Actions:</b>", 'Weight': 0}),
-        ui.Button({'ID': PAGE_EDIT_ID, 'Text': "Edit Page", 'Weight': 0.1}),
-        ui.Button({'ID': PAGE_COLOR_ID, 'Text': "Color Page", 'Weight': 0.1}),
-        ui.Button({'ID': PAGE_DELIVER_ID, 'Text': "Deliver Page", 'Weight': 0.1}),
-        ui.Button({'ID': AI_CUTS_ID, 'Text': "Detect Cuts", 'Weight': 0.1}),
-        ui.Button({'ID': AI_SUBS_ID, 'Text': "Auto Subtitles", 'Weight': 0.1}),
-        ui.Button({'ID': AI_VOICE_ID, 'Text': "Voice Isolation", 'Weight': 0.1}),
-        ui.Button({'ID': SAVE_ID, 'Text': "Save Project", 'Weight': 0.1}),
-    ]),
+    # Chat history state
+    chat_entries = [
+        "[EditAI] Welcome to EditAI Assistant inside DaVinci Resolve 21!",
+        "[EditAI] " + get_summary_text(),
+        "[EditAI] Type commands below (e.g. 'Go to 01:00:15:00', 'Add blue marker called Cut Here', 'Export to C:/video.mp4') and click Execute."
+    ]
 
-    # Chat Transcript Box
-    ui.Label({'Text': "<b>Chat History & Execution Log:</b>", 'Weight': 0}),
-    ui.TextEdit({
-        'ID': HISTORY_ID,
-        'ReadOnly': True,
-        'Weight': 1.0,
-        'PlaceholderText': "Welcome to EditAI Assistant!\nEnter any natural language command below to control DaVinci Resolve.\nExample: 'Import media sample.mp4', 'Go to 01:00:15:00', 'Create a new timeline called Cut 1'...",
-        'Font': ui.Font({'Family': "Consolas", 'PixelSize': 12})
-    }),
+    def refresh_display():
+        h = win.Find(HISTORY_ID)
+        if h:
+            h.PlainText = "\n\n".join(chat_entries)
+        s = win.Find(STATUS_ID)
+        if s:
+            s.Text = get_summary_text()
 
-    # User Input Field
-    ui.Label({'Text': "<b>Natural Language Prompt:</b>", 'Weight': 0}),
-    ui.LineEdit({
-        'ID': INPUT_ID,
-        'PlaceholderText': "Type a command (e.g. 'Switch to color page', 'Add blue marker called Cut Here', 'Export timeline')...",
-        'Weight': 0,
-        'ClearButtonEnabled': True
-    }),
+    # Event handlers
+    def OnClose(ev):
+        dispatcher.ExitLoop()
 
-    # Command Execution Bar
-    ui.HGroup({'Weight': 0, 'Spacing': 6}, [
-        ui.Button({'ID': SEND_BTN_ID, 'Text': "Send Command (Enter)", 'Weight': 0.8}),
-        ui.Button({'ID': CLEAR_BTN_ID, 'Text': "Clear History", 'Weight': 0.2}),
-    ])
-]))
+    def OnSend(ev):
+        try:
+            inp = win.Find(INPUT_ID)
+            prompt = inp.PlainText.strip() if inp else ""
+            if not prompt:
+                return
+            
+            chat_entries.append(f"[USER] {prompt}")
+            inp.PlainText = ""
+            refresh_display()
 
-# Chat log state
-chat_log = []
+            # Execute
+            res = nlp_engine.execute_prompt(prompt)
+            msg = res.get("message") or res.get("error", "Action processed.")
+            chat_entries.append(f"[EditAI] {msg}")
+            refresh_display()
+        except Exception as e:
+            log_msg(f"Error in OnSend: {traceback.format_exc()}")
+            chat_entries.append(f"[EditAI Error] {e}")
+            refresh_display()
 
-def append_to_chat(role: str, text: str):
-    prefix = "[USER]" if role == "user" else "[EditAI]"
-    chat_log.append(f"{prefix} {text}\n")
-    history_widget = win.Find(HISTORY_ID)
-    if history_widget:
-        history_widget.PlainText = "\n".join(chat_log)
+    def OnClear(ev):
+        global chat_entries
+        chat_entries = ["[EditAI] Log cleared."]
+        refresh_display()
 
-def update_status():
-    status_widget = win.Find(STATUS_ID)
-    if status_widget:
-        status_widget.Text = get_status_text()
+    def make_action_handler(action_name, params=None):
+        def handler(ev):
+            try:
+                res = nlp_engine._dispatch_action(action_name, params or {})
+                msg = res.get("message") or res.get("error", "Executed.")
+                chat_entries.append(f"[EditAI] {msg}")
+                refresh_display()
+            except Exception as e:
+                log_msg(f"Error in quick action {action_name}: {traceback.format_exc()}")
+        return handler
 
-# Event Handlers
-def OnClose(ev):
-    dispatcher.ExitLoop()
+    # Bind events
+    win.On[winID].Close = OnClose
+    win.On[SEND_BTN_ID].Clicked = OnSend
+    win.On[CLEAR_BTN_ID].Clicked = OnClear
 
-def OnSend(ev):
-    input_widget = win.Find(INPUT_ID)
-    prompt = input_widget.Text.strip() if input_widget else ""
-    if not prompt:
-        return
+    win.On[PAGE_EDIT_ID].Clicked = make_action_handler("switch_page", {"page": "edit"})
+    win.On[PAGE_COLOR_ID].Clicked = make_action_handler("switch_page", {"page": "color"})
+    win.On[PAGE_DELIVER_ID].Clicked = make_action_handler("switch_page", {"page": "deliver"})
+    win.On[AI_CUTS_ID].Clicked = make_action_handler("detect_scene_cuts", {})
+    win.On[AI_SUBS_ID].Clicked = make_action_handler("create_subtitles_from_audio", {})
+    win.On[AI_VOICE_ID].Clicked = make_action_handler("enable_voice_isolation", {"track_index": 1})
+    win.On[SAVE_ID].Clicked = make_action_handler("save_project", {})
 
-    # Add user message
-    append_to_chat("user", prompt)
-    input_widget.Text = ""
+    # Initial view
+    refresh_display()
+    win.Show()
+    log_msg("Calling dispatcher.RunLoop()")
+    dispatcher.RunLoop()
+    log_msg("Exited dispatcher.RunLoop()")
 
-    # Execute via NLP engine
-    result = nlp_engine.execute_prompt(prompt)
-    msg = result.get("message", "Action processed.")
-    append_to_chat("assistant", msg)
-    update_status()
-
-def OnClear(ev):
-    global chat_log
-    chat_log = []
-    history_widget = win.Find(HISTORY_ID)
-    if history_widget:
-        history_widget.PlainText = ""
-
-# Quick Action Handlers
-def OnPageEdit(ev):
-    res = controller.switch_page("edit")
-    append_to_chat("assistant", res.get("message", "Switched to Edit."))
-    update_status()
-
-def OnPageColor(ev):
-    res = controller.switch_page("color")
-    append_to_chat("assistant", res.get("message", "Switched to Color."))
-    update_status()
-
-def OnPageDeliver(ev):
-    res = controller.switch_page("deliver")
-    append_to_chat("assistant", res.get("message", "Switched to Deliver."))
-    update_status()
-
-def OnAiCuts(ev):
-    append_to_chat("user", "Detect scene cuts")
-    res = controller.detect_scene_cuts()
-    append_to_chat("assistant", res.get("message", res.get("error", "")))
-    update_status()
-
-def OnAiSubs(ev):
-    append_to_chat("user", "Auto generate subtitles")
-    res = controller.create_subtitles_from_audio()
-    append_to_chat("assistant", res.get("message", res.get("error", "")))
-    update_status()
-
-def OnAiVoice(ev):
-    append_to_chat("user", "Enable voice isolation on audio track 1")
-    res = controller.enable_voice_isolation(1)
-    append_to_chat("assistant", res.get("message", res.get("error", "")))
-    update_status()
-
-def OnSaveProject(ev):
-    append_to_chat("user", "Save project")
-    res = controller.save_project()
-    append_to_chat("assistant", res.get("message", res.get("error", "")))
-    update_status()
-
-# Connect Event Listeners
-win.On[winID].Close = OnClose
-win.On[SEND_BTN_ID].Clicked = OnSend
-win.On[INPUT_ID].ReturnPressed = OnSend
-win.On[CLEAR_BTN_ID].Clicked = OnClear
-
-win.On[PAGE_EDIT_ID].Clicked = OnPageEdit
-win.On[PAGE_COLOR_ID].Clicked = OnPageColor
-win.On[PAGE_DELIVER_ID].Clicked = OnPageDeliver
-win.On[AI_CUTS_ID].Clicked = OnAiCuts
-win.On[AI_SUBS_ID].Clicked = OnAiSubs
-win.On[AI_VOICE_ID].Clicked = OnAiVoice
-win.On[SAVE_ID].Clicked = OnSaveProject
-
-# Show Window & Enter Event Loop
-win.Show()
-append_to_chat("assistant", "EditAI Assistant is active and connected to DaVinci Resolve.")
-append_to_chat("assistant", get_status_text().replace("<b>", "").replace("</b>", "").replace("<span style='color: #22c55e;'>", "").replace("<span style='color: #38bdf8;'>", "").replace("<span style='color: #fbbf24;'>", "").replace("<span style='color: #f1f5f9;'>", "").replace("</span>", "").replace("&nbsp;|&nbsp;", " | "))
-dispatcher.StartLoop()
+except Exception as fatal_e:
+    log_msg(f"FATAL EXCEPTION: {traceback.format_exc()}")
+    print(f"EditAI Fatal Exception: {traceback.format_exc()}")
