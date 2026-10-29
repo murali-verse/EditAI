@@ -119,23 +119,35 @@ class CommandParser:
                         llm_provider=provider_name
                     )
 
-            # B. Delete / Cut via LLM
-            elif action in ["delete", "cut"]:
+            # B. Delete / Cut / Trim via LLM
+            elif action in ["delete", "cut", "trim"]:
                 start = llm_result.get("start_time")
                 end = llm_result.get("end_time")
                 if start is not None and end is not None:
                     st, et = float(start), float(end)
-                    sel_tl, _ = timeline_manager.select_range(timeline, st, et)
-                    updated_tl, msg = timeline_manager.delete_selection(sel_tl)
-                    return ChatbotCommandResponse(
-                        understood=True,
-                        intent="delete",
-                        message=f"[{provider_name}] {explanation}",
-                        target_time=st,
-                        updated_timeline=updated_tl,
-                        action_description=f"Deleted range {st:.1f}s - {et:.1f}s",
-                        llm_provider=provider_name
-                    )
+                    if action == "trim" and ("keep" in explanation.lower() or "keep" in raw_cmd.lower()):
+                        updated_tl, msg = timeline_manager.trim_to_range(timeline, st, et)
+                        return ChatbotCommandResponse(
+                            understood=True,
+                            intent="trim",
+                            message=f"[{provider_name}] {explanation}",
+                            target_time=st,
+                            updated_timeline=updated_tl,
+                            action_description=f"Trimmed to range {st:.1f}s - {et:.1f}s",
+                            llm_provider=provider_name
+                        )
+                    else:
+                        sel_tl, _ = timeline_manager.select_range(timeline, st, et)
+                        updated_tl, msg = timeline_manager.delete_selection(sel_tl)
+                        return ChatbotCommandResponse(
+                            understood=True,
+                            intent=action,
+                            message=f"[{provider_name}] {explanation}",
+                            target_time=st,
+                            updated_timeline=updated_tl,
+                            action_description=f"Removed range {st:.1f}s - {et:.1f}s",
+                            llm_provider=provider_name
+                        )
                 elif llm_result.get("target_clip_id"):
                     target_id = llm_result.get("target_clip_id")
                     target_clip = next((c for c in timeline.clips if c.id == target_id), None)
@@ -207,6 +219,13 @@ class CommandParser:
                 return ChatbotCommandResponse(
                     understood=True,
                     intent="export",
+                    message=f"[{provider_name}] {explanation}",
+                    llm_provider=provider_name
+                )
+            elif explanation:
+                return ChatbotCommandResponse(
+                    understood=True,
+                    intent=action or "guidance",
                     message=f"[{provider_name}] {explanation}",
                     llm_provider=provider_name
                 )

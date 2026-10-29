@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional, List
@@ -10,11 +11,119 @@ DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 class AIModelAdapter:
     """
-    Multi-Provider LLM Adapter supporting:
-    1. Google Gemini API (gemini-1.5-flash, gemini-2.0-flash, gemini-2.5-flash)
-    2. OpenAI / Groq / OpenRouter API
-    3. Local Ollama (with dynamic model detection e.g. llama3.2:1b)
+    Multi-Provider Frontier LLM Adapter supporting:
+    1. Claude Fable 5.1 (Anthropic Messages API / OpenRouter claude-fable-5-1)
+    2. Google Gemini API (gemini-1.5-flash, gemini-2.0-flash, gemini-2.5-flash)
+    3. OpenAI / Groq / OpenRouter API
+    4. Local Ollama (dynamic model detection e.g. llama3.2:1b)
     """
+
+    @classmethod
+    def call_fable_anthropic(
+        cls,
+        user_prompt: str,
+        system_instruction: str,
+        api_key: str,
+        model: str = "claude-fable-5-1",
+        base_url: str = "https://api.anthropic.com/v1"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Invokes Claude Fable 5.1 via Anthropic Messages REST API.
+        Extracts structured JSON response.
+        """
+        if not api_key:
+            return None
+
+        clean_key = api_key.strip()
+        url = f"{base_url.rstrip('/')}/messages"
+        payload = {
+            "model": model or "claude-fable-5-1",
+            "max_tokens": 4096,
+            "system": system_instruction,
+            "messages": [
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": 0.2
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "x-api-key": clean_key,
+            "anthropic-version": "2023-06-01",
+            "User-Agent": "EditMind-AI/Claude-Fable"
+        }
+
+        # If key looks like an OpenAI/OpenRouter bearer token, support fallback header
+        if clean_key.startswith("sk-or-") or "openrouter" in base_url:
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {clean_key}",
+                "HTTP-Referer": "https://editmind.ai",
+                "X-Title": "EditMind AI"
+            }
+            url = f"{base_url.rstrip('/')}/chat/completions"
+            payload = {
+                "model": "anthropic/claude-fable-5-1" if "openrouter" in base_url else (model or "claude-fable-5-1"),
+                "messages": [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2
+            }
+
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers=headers)
+            with urllib.request.urlopen(req, timeout=15.0) as res:
+                res_data = json.loads(res.read().decode("utf-8"))
+                
+                # Check Anthropic format
+                if "content" in res_data and isinstance(res_data["content"], list):
+                    for item in res_data["content"]:
+                        if item.get("type") == "text":
+                            raw_text = item.get("text", "").strip()
+                            return cls._clean_and_parse_json(raw_text)
+
+                # Check OpenAI / OpenRouter format
+                choices = res_data.get("choices", [])
+                if choices:
+                    content = choices[0].get("message", {}).get("content", "").strip()
+                    return cls._clean_and_parse_json(content)
+        except Exception as e:
+            print(f"Claude Fable 5.1 API note: {e}")
+            return None
+        return None
+
+    @classmethod
+    def _clean_and_parse_json(cls, raw_text: str) -> Optional[Dict[str, Any]]:
+        """Cleans and extracts JSON object from LLM response text."""
+        if not raw_text:
+            return None
+        
+        # 1. Direct parse
+        try:
+            return json.loads(raw_text)
+        except Exception:
+            pass
+
+        # 2. Extract from markdown code fences ```json ... ```
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw_text)
+        if fence_match:
+            try:
+                return json.loads(fence_match.group(1).strip())
+            except Exception:
+                pass
+
+        # 3. Find outermost braces { ... }
+        brace_match = re.search(r"(\{[\s\S]*\})", raw_text)
+        if brace_match:
+            try:
+                return json.loads(brace_match.group(1).strip())
+            except Exception:
+                pass
+
+        return None
 
     @classmethod
     def get_ollama_models(cls, host: str = DEFAULT_OLLAMA_HOST) -> List[str]:
@@ -181,6 +290,7 @@ class AIModelAdapter:
         """
         config = llm_config or {}
         provider = config.get("provider", "auto").lower()
+        fable_key = config.get("fable_api_key") or config.get("anthropic_api_key") or os.environ.get("FABLE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         api_key = config.get("api_key") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         openai_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
         custom_model = config.get("model")
@@ -219,7 +329,7 @@ class AIModelAdapter:
                 })
 
         system_instruction = (
-            "You are EditMind AI, an intelligent, precision video editor. "
+            "You are EditMind AI, powered by Claude Fable 5.1 precision reasoning. "
             "Analyze the user's natural-language video editing request in the context of the active timeline and scenes. "
             "Convert their intent into an actionable JSON object with this exact structure:\n"
             "{\n"
@@ -249,14 +359,21 @@ class AIModelAdapter:
             f"User Command: \"{prompt}\""
         )
 
-        # 1. Try Gemini if configured or API key present
+        # 1. Claude Fable 5.1 (Top Priority for precision reasoning)
+        if (provider in ["fable", "claude", "auto"]) and fable_key:
+            res = cls.call_fable_anthropic(user_content, system_instruction, fable_key, custom_model or "claude-fable-5-1")
+            if res:
+                res["llm_provider"] = "Claude Fable 5.1"
+                return res
+
+        # 2. Try Gemini if configured or API key present
         if (provider in ["gemini", "auto"]) and api_key:
             res = cls.call_gemini(user_content, system_instruction, api_key, custom_model or "gemini-1.5-flash")
             if res:
                 res["llm_provider"] = "Google Gemini"
                 return res
 
-        # 2. Try OpenAI / Groq if configured
+        # 3. Try OpenAI / Groq if configured
         if (provider in ["openai", "groq", "auto"]) and openai_key:
             base_url = "https://api.groq.com/openai/v1" if (provider == "groq" or "gsk_" in openai_key) else "https://api.openai.com/v1"
             model = custom_model or ("llama-3.3-70b-versatile" if "groq" in base_url else "gpt-4o-mini")
@@ -265,7 +382,7 @@ class AIModelAdapter:
                 res["llm_provider"] = "Groq / OpenAI"
                 return res
 
-        # 3. Try Ollama when explicitly selected by user
+        # 4. Try Ollama when explicitly selected by user
         if provider == "ollama":
             ollama_models = cls.get_ollama_models()
             if ollama_models:
@@ -275,3 +392,152 @@ class AIModelAdapter:
                     return res
 
         return None
+
+    @classmethod
+    def synthesize_story_with_llm(
+        cls,
+        clip_analyses: List[Any],
+        style: str = "narrative",
+        user_prompt: Optional[str] = None,
+        target_duration: Optional[float] = None,
+        llm_config: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Synthesizes a master narrative sequence from multi-clip source footage using Claude Fable 5.1.
+        """
+        config = llm_config or {}
+        provider = config.get("provider", "auto").lower()
+        fable_key = config.get("fable_api_key") or config.get("anthropic_api_key") or os.environ.get("FABLE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        api_key = config.get("api_key") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        openai_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY")
+        custom_model = config.get("model")
+
+        # Compile rich footage catalog
+        footage_manifest = []
+        clip_by_name = {}
+        for c in clip_analyses:
+            clip_by_name[c.filename] = c
+            footage_manifest.append({
+                "filename": c.filename,
+                "duration": round(c.duration, 2),
+                "resolution": f"{c.width}x{c.height}",
+                "category": c.primary_category,
+                "motion_level": c.motion_level,
+                "content_tags": c.content_tags,
+                "speech_summary": c.speech_summary,
+                "quality_score": c.quality_score,
+                "scene_count": len(c.scenes)
+            })
+
+        system_instruction = (
+            "You are Claude Fable 5.1, the world-class Lead Video Director and Film Editor for EditMind AI. "
+            "You are assembling raw multi-source video footage into an engaging, cohesive final video sequence.\n\n"
+            "Editing Objectives:\n"
+            "1. Hook / Opening: Grab audience attention within the first 3-5 seconds using high-clarity dialogue or kinetic action.\n"
+            "2. Visual Pacing & B-Roll: Interleave dynamic B-roll to complement spoken dialogue and keep momentum.\n"
+            "3. Informational Core: Deliver the central thesis or keynote information cleanly.\n"
+            "4. Climax & Closure: Provide satisfying visual closure and outro.\n\n"
+            "You must return ONLY a valid JSON object with this exact structure:\n"
+            "{\n"
+            '  "story_title": "Creative Title of Assembled Sequence",\n'
+            '  "style_rationale": "High-level directorial explanation of pacing and sequence structure",\n'
+            '  "segments": [\n'
+            "    {\n"
+            '      "source_filename": "exact filename matching one in footage manifest",\n'
+            '      "source_in": 0.0,\n'
+            '      "source_out": 4.5,\n'
+            '      "role": "Hook / Opening Narrative" | "Dynamic Action B-Roll" | "Core Content Exposition" | "Scenic Finale / Outro",\n'
+            '      "rationale": "Professional editorial reason for selecting this exact segment",\n'
+            '      "trimmed_reason": "What was cut or trimmed to maintain pacing",\n'
+            '      "confidence": 0.96,\n'
+            '      "caption_text": "Short synchronized caption or title card"\n'
+            "    }\n"
+            "  ],\n"
+            '  "discarded_summary": [\n'
+            '    {"clip": "filename", "range": "start - end", "reason": "why omitted"}\n'
+            "  ],\n"
+            '  "audio_sync_note": "How dialogue audio and b-roll ambient sound are harmonized"\n'
+            "}\n\n"
+            "Constraints:\n"
+            "- source_in must be >= 0.0 and < source_out.\n"
+            "- source_out must be <= that source clip's duration.\n"
+            "- Include between 3 and 6 carefully timed segments.\n"
+            "- Ensure the segments create a continuous narrative arc."
+        )
+
+        user_content = (
+            f"Production Style: {style}\n"
+            f"Target Total Duration: {target_duration or 'Optimal (12s - 25s)'}\n"
+            f"User Directorial Request: {user_prompt or 'Create a balanced, engaging multi-clip narrative cut.'}\n\n"
+            f"Source Footage Manifest:\n{json.dumps(footage_manifest, indent=2)}"
+        )
+
+        raw_result = None
+        director_label = "Claude Fable 5.1"
+
+        # 1. Claude Fable 5.1 (Anthropic frontier)
+        if (provider in ["fable", "claude", "auto"]) and fable_key:
+            raw_result = cls.call_fable_anthropic(user_content, system_instruction, fable_key, custom_model or "claude-fable-5-1")
+            director_label = "Claude Fable 5.1"
+
+        # 2. Gemini fallback
+        if not raw_result and (provider in ["gemini", "auto"]) and api_key:
+            raw_result = cls.call_gemini(user_content, system_instruction, api_key, custom_model or "gemini-1.5-flash")
+            director_label = "Google Gemini"
+
+        # 3. OpenAI / Groq fallback
+        if not raw_result and (provider in ["openai", "groq", "auto"]) and openai_key:
+            base_url = "https://api.groq.com/openai/v1" if (provider == "groq" or "gsk_" in openai_key) else "https://api.openai.com/v1"
+            model = custom_model or ("llama-3.3-70b-versatile" if "groq" in base_url else "gpt-4o-mini")
+            raw_result = cls.call_openai_compatible(user_content, system_instruction, openai_key, base_url, model)
+            director_label = "OpenAI / Groq"
+
+        if not raw_result or not isinstance(raw_result, dict):
+            return None
+
+        # Validate and clamp segment bounds against real source clips
+        segments = raw_result.get("segments", [])
+        if not segments or not isinstance(segments, list):
+            return None
+
+        validated_segments = []
+        for seg in segments:
+            fn = seg.get("source_filename")
+            if fn not in clip_by_name:
+                # Attempt to find best match
+                for valid_fn in clip_by_name:
+                    if fn and (fn in valid_fn or valid_fn in fn):
+                        fn = valid_fn
+                        break
+                else:
+                    continue
+
+            clip_meta = clip_by_name[fn]
+            dur = clip_meta.duration
+            sin = max(0.0, float(seg.get("source_in", 0.0)))
+            sout = min(dur, float(seg.get("source_out", dur)))
+            if sout <= sin:
+                sout = min(dur, sin + 3.0)
+            if sin >= dur:
+                sin = 0.0
+                sout = min(dur, 4.0)
+
+            validated_segments.append({
+                "source_filename": fn,
+                "source_filepath": clip_meta.filepath,
+                "source_in": round(sin, 2),
+                "source_out": round(sout, 2),
+                "duration": round(sout - sin, 2),
+                "role": seg.get("role") or "Narrative Segment",
+                "rationale": seg.get("rationale") or f"Curated by {director_label} for visual impact.",
+                "trimmed_reason": seg.get("trimmed_reason"),
+                "confidence": float(seg.get("confidence", 0.95)),
+                "caption_text": seg.get("caption_text")
+            })
+
+        if not validated_segments:
+            return None
+
+        raw_result["segments"] = validated_segments
+        raw_result["director_label"] = director_label
+        return raw_result

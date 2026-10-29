@@ -23,7 +23,8 @@ export default function AIChatbotPanel({
 }) {
   const [inputText, setInputText] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem('editmind_llm_provider') || 'auto');
+  const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem('editmind_llm_provider') || 'fable');
+  const [fableKey, setFableKey] = useState(() => localStorage.getItem('editmind_fable_key') || '');
   const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('editmind_gemini_key') || '');
   const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('editmind_openai_key') || '');
   const [availableProviders, setAvailableProviders] = useState(null);
@@ -44,6 +45,7 @@ export default function AIChatbotPanel({
 
   const handleSaveSettings = () => {
     localStorage.setItem('editmind_llm_provider', llmProvider);
+    localStorage.setItem('editmind_fable_key', fableKey);
     localStorage.setItem('editmind_gemini_key', geminiKey);
     localStorage.setItem('editmind_openai_key', openaiKey);
     setIsSettingsOpen(false);
@@ -66,6 +68,7 @@ export default function AIChatbotPanel({
 
     const config = {
       provider: llmProvider,
+      fable_api_key: fableKey.trim() || undefined,
       api_key: geminiKey.trim() || undefined,
       openai_api_key: openaiKey.trim() || undefined
     };
@@ -79,13 +82,15 @@ export default function AIChatbotPanel({
   }, [chatMessages]);
 
   const activeBadgeLabel =
-    llmProvider === 'gemini' && geminiKey
+    llmProvider === 'fable' && fableKey
+      ? 'Claude Fable 5.1'
+      : llmProvider === 'gemini' && geminiKey
       ? 'Gemini Flash'
       : llmProvider === 'openai' && openaiKey
       ? 'OpenAI/Groq'
       : availableProviders?.ollama_ready
       ? `Ollama (${availableProviders.ollama_models?.[0] || 'Local'})`
-      : 'Smart Semantic AI';
+      : 'Claude Fable / Semantic';
 
   return (
     <div className="h-full flex flex-col bg-[#141518] text-[#a0a4ae] select-none text-[11px] relative">
@@ -127,18 +132,35 @@ export default function AIChatbotPanel({
 
           <div className="space-y-2">
             <div>
-              <label className="block text-[10px] text-[#868a96] mb-1">Provider:</label>
+              <label className="block text-[10px] text-[#868a96] mb-1">Reasoning Provider:</label>
               <select
                 value={llmProvider}
                 onChange={(e) => setLlmProvider(e.target.value)}
                 className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2 py-1 text-[11px] focus:outline-none"
               >
-                <option value="auto">Smart Semantic Reasoner (Fast & Local)</option>
+                <option value="fable">Claude Fable 5.1 (Anthropic Frontier)</option>
+                <option value="auto">Smart Semantic Reasoner (Fast & Offline)</option>
                 <option value="gemini">Google Gemini (Gemini 1.5/2.0 Flash)</option>
                 <option value="openai">OpenAI / Groq API</option>
                 <option value="ollama">Ollama Local ({availableProviders?.ollama_models?.[0] || 'Auto-detect'})</option>
               </select>
             </div>
+
+            {llmProvider === 'fable' && (
+              <div>
+                <label className="block text-[10px] text-[#868a96] mb-1 flex items-center justify-between">
+                  <span>Claude Fable 5.1 API Key:</span>
+                  <span className="text-[9px] text-[#d48b3b] font-mono">Anthropic claude-fable-5-1</span>
+                </label>
+                <input
+                  type="password"
+                  value={fableKey}
+                  onChange={(e) => setFableKey(e.target.value)}
+                  placeholder="Paste Anthropic API Key (sk-ant-...) or Fable Key..."
+                  className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2 py-1 text-[10px] focus:outline-none focus:border-[#4f6b95]"
+                />
+              </div>
+            )}
 
             {llmProvider === 'gemini' && (
               <div>

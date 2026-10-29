@@ -25,12 +25,13 @@ async def analyze_and_assemble(request: AssemblyRequest):
     if not clip_analyses:
         raise HTTPException(status_code=400, detail="Unable to inspect provided media files.")
 
-    # Step 2: Intelligent sequence assembly with editorial decisions
+    # Step 2: Intelligent sequence assembly with editorial decisions (Claude Fable 5.1 / Semantic)
     result = AssemblyService.assemble_production(
         clip_analyses=clip_analyses,
         style=request.style,
         user_prompt=request.user_prompt,
-        target_duration=request.target_duration
+        target_duration=request.target_duration,
+        llm_config=request.llm_config
     )
     return result
 

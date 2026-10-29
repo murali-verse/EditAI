@@ -190,3 +190,4 @@ class AssemblyRequest(BaseModel):
     user_prompt: Optional[str] = None
     target_duration: Optional[float] = None
     include_subtitles: bool = True
+    llm_config: Optional[Dict[str, Any]] = None

@@ -20,11 +20,14 @@ async def process_chat_command(request: ChatbotCommandRequest):
 async def get_llm_providers():
     """Returns available LLM engines and their configuration status."""
     ollama_models = AIModelAdapter.get_ollama_models()
+    fable_key = bool(os.environ.get("FABLE_API_KEY") or os.environ.get("ANTHROPIC_API_KEY"))
     gemini_key = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
     openai_key = bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("GROQ_API_KEY"))
 
     active = "Semantic NLP"
-    if gemini_key:
+    if fable_key:
+        active = "Claude Fable 5.1"
+    elif gemini_key:
         active = "Google Gemini"
     elif openai_key:
         active = "OpenAI / Groq"
@@ -32,6 +35,7 @@ async def get_llm_providers():
         active = f"Ollama ({ollama_models[0]})"
 
     return {
+        "fable_ready": fable_key,
         "gemini_ready": gemini_key,
         "openai_ready": openai_key,
         "ollama_ready": len(ollama_models) > 0,

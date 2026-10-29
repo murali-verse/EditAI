@@ -104,7 +104,8 @@ class AssemblyService:
         clip_analyses: List[SourceClipAnalysis],
         style: str = "narrative",
         user_prompt: Optional[str] = None,
-        target_duration: Optional[float] = None
+        target_duration: Optional[float] = None,
+        llm_config: Optional[Dict[str, Any]] = None
     ) -> MultiClipAssemblyResult:
         """
         Synthesizes multiple analyzed source clips into a single coherent sequence with
@@ -116,109 +117,159 @@ class AssemblyService:
         assembly_id = f"assembly_{uuid.uuid4().hex[:10]}"
         segments: List[AssemblySegmentDecision] = []
         discarded_summary: List[Dict[str, Any]] = []
-
-        # Sort or categorize clips
-        dialogue_clips = [c for c in clip_analyses if c.primary_category == "dialogue"]
-        action_clips = [c for c in clip_analyses if c.primary_category == "action_broll"]
-        scenic_clips = [c for c in clip_analyses if c.primary_category in ["scenic_broll", "presentation"]]
-
         current_timeline_time = 0.0
 
-        # --- 1. SEGMENT 1: The Narrative Hook / Intro ---
-        intro_clip = dialogue_clips[0] if dialogue_clips else clip_analyses[0]
-        intro_dur = min(5.0, intro_clip.duration)
-        segments.append(AssemblySegmentDecision(
-            segment_id=f"seg_{uuid.uuid4().hex[:6]}",
-            source_filename=intro_clip.filename,
-            source_filepath=intro_clip.filepath,
-            source_in=0.0,
-            source_out=intro_dur,
-            duration=intro_dur,
-            timeline_start=round(current_timeline_time, 2),
-            timeline_end=round(current_timeline_time + intro_dur, 2),
-            role="Hook / Opening Narrative",
-            rationale=f"Selected opening {intro_dur:.1f}s from '{intro_clip.filename}' because it establishes clear dialogue and context.",
-            trimmed_reason=f"Trimmed remaining {max(0, intro_clip.duration - intro_dur):.1f}s to maintain initial viewer engagement.",
-            confidence=0.96,
-            caption_text="Welcome to EditMind AI Video Assembly."
-        ))
-        current_timeline_time += intro_dur
+        # Attempt Claude Fable 5.1 / Frontier LLM Directorial Synthesis
+        llm_synthesis = None
+        if llm_config:
+            try:
+                llm_synthesis = AIModelAdapter.synthesize_story_with_llm(
+                    clip_analyses=clip_analyses,
+                    style=style,
+                    user_prompt=user_prompt,
+                    target_duration=target_duration,
+                    llm_config=llm_config
+                )
+            except Exception as e:
+                print(f"Directorial LLM synthesis note: {e}")
 
-        if intro_clip.duration > intro_dur:
-            discarded_summary.append({
-                "clip": intro_clip.filename,
-                "range": f"{intro_dur:.1f}s - {intro_clip.duration:.1f}s",
-                "reason": "Trimmed subsequent speaker monologue to make room for illustrative B-roll action."
-            })
+        if llm_synthesis and llm_synthesis.get("segments"):
+            director_label = llm_synthesis.get("director_label", "Claude Fable 5.1")
+            for seg in llm_synthesis["segments"]:
+                dur = round(seg["source_out"] - seg["source_in"], 2)
+                segments.append(AssemblySegmentDecision(
+                    segment_id=f"seg_{uuid.uuid4().hex[:6]}",
+                    source_filename=seg["source_filename"],
+                    source_filepath=seg["source_filepath"],
+                    source_in=seg["source_in"],
+                    source_out=seg["source_out"],
+                    duration=dur,
+                    timeline_start=round(current_timeline_time, 2),
+                    timeline_end=round(current_timeline_time + dur, 2),
+                    role=seg["role"],
+                    rationale=seg["rationale"],
+                    trimmed_reason=seg.get("trimmed_reason"),
+                    confidence=seg.get("confidence", 0.96),
+                    caption_text=seg.get("caption_text")
+                ))
+                current_timeline_time += dur
 
-        # --- 2. SEGMENT 2: Dynamic Action B-Roll ---
-        broll_clip = action_clips[0] if action_clips else (clip_analyses[1] if len(clip_analyses) > 1 else clip_analyses[0])
-        broll_in = 1.0 if broll_clip.duration > 5.0 else 0.0
-        broll_dur = min(4.5, max(2.5, broll_clip.duration - broll_in))
-        segments.append(AssemblySegmentDecision(
-            segment_id=f"seg_{uuid.uuid4().hex[:6]}",
-            source_filename=broll_clip.filename,
-            source_filepath=broll_clip.filepath,
-            source_in=broll_in,
-            source_out=broll_in + broll_dur,
-            duration=broll_dur,
-            timeline_start=round(current_timeline_time, 2),
-            timeline_end=round(current_timeline_time + broll_dur, 2),
-            role="Dynamic Action B-Roll",
-            rationale=f"Inserted {broll_dur:.1f}s high-motion sequence from '{broll_clip.filename}' to accelerate visual pacing.",
-            trimmed_reason=f"Omitted static pre-roll ({broll_in:.1f}s) to start directly on peak kinetic movement.",
-            confidence=0.92,
-            caption_text="High-energy visual cut assembled automatically."
-        ))
-        current_timeline_time += broll_dur
-
-        # --- 3. SEGMENT 3: Core Message / Middle Content ---
-        if len(clip_analyses) > 2:
-            core_clip = clip_analyses[2]
-        elif dialogue_clips and intro_clip.duration > 8.0:
-            core_clip = intro_clip
+            discarded_summary = llm_synthesis.get("discarded_summary", [])
+            audio_sync_note = llm_synthesis.get(
+                "audio_sync_note",
+                f"Multi-clip audio harmonized by {director_label} with dialogue preservation and clean cutaways."
+            )
+            style_title = f"{llm_synthesis.get('story_title', style.capitalize())} ({director_label} Cut)"
         else:
-            core_clip = clip_analyses[-1]
+            # Fallback to deterministic heuristic assembly
+            audio_sync_note = "Dialogue source audio preserved on speech segments; B-roll video segments synchronized with ambient audio track."
+            dialogue_clips = [c for c in clip_analyses if c.primary_category == "dialogue"]
+            action_clips = [c for c in clip_analyses if c.primary_category == "action_broll"]
+            scenic_clips = [c for c in clip_analyses if c.primary_category in ["scenic_broll", "presentation"]]
 
-        core_in = 4.0 if (core_clip.duration > 8.0 and core_clip.filename == intro_clip.filename) else 0.0
-        core_dur = min(5.0, core_clip.duration - core_in)
-        segments.append(AssemblySegmentDecision(
-            segment_id=f"seg_{uuid.uuid4().hex[:6]}",
-            source_filename=core_clip.filename,
-            source_filepath=core_clip.filepath,
-            source_in=core_in,
-            source_out=core_in + core_dur,
-            duration=core_dur,
-            timeline_start=round(current_timeline_time, 2),
-            timeline_end=round(current_timeline_time + core_dur, 2),
-            role="Core Content Exposition",
-            rationale=f"Included {core_dur:.1f}s from '{core_clip.filename}' to deliver primary informational message.",
-            trimmed_reason="Focused on the highest audio energy section without awkward pauses.",
-            confidence=0.94,
-            caption_text="Examining source media and pacing."
-        ))
-        current_timeline_time += core_dur
+            # --- 1. SEGMENT 1: The Narrative Hook / Intro ---
+            intro_clip = dialogue_clips[0] if dialogue_clips else clip_analyses[0]
+            intro_dur = min(5.0, intro_clip.duration)
+            segments.append(AssemblySegmentDecision(
+                segment_id=f"seg_{uuid.uuid4().hex[:6]}",
+                source_filename=intro_clip.filename,
+                source_filepath=intro_clip.filepath,
+                source_in=0.0,
+                source_out=intro_dur,
+                duration=intro_dur,
+                timeline_start=round(current_timeline_time, 2),
+                timeline_end=round(current_timeline_time + intro_dur, 2),
+                role="Hook / Opening Narrative",
+                rationale=f"Selected opening {intro_dur:.1f}s from '{intro_clip.filename}' because it establishes clear dialogue and context.",
+                trimmed_reason=f"Trimmed remaining {max(0, intro_clip.duration - intro_dur):.1f}s to maintain initial viewer engagement.",
+                confidence=0.96,
+                caption_text="Welcome to EditMind AI Video Assembly."
+            ))
+            current_timeline_time += intro_dur
 
-        # --- 4. SEGMENT 4: Climax / Outro ---
-        outro_clip = scenic_clips[-1] if scenic_clips else clip_analyses[-1]
-        outro_in = max(0.0, outro_clip.duration - 4.5)
-        outro_dur = round(outro_clip.duration - outro_in, 2)
-        segments.append(AssemblySegmentDecision(
-            segment_id=f"seg_{uuid.uuid4().hex[:6]}",
-            source_filename=outro_clip.filename,
-            source_filepath=outro_clip.filepath,
-            source_in=outro_in,
-            source_out=outro_clip.duration,
-            duration=outro_dur,
-            timeline_start=round(current_timeline_time, 2),
-            timeline_end=round(current_timeline_time + outro_dur, 2),
-            role="Scenic Finale / Outro",
-            rationale=f"Selected concluding {outro_dur:.1f}s from '{outro_clip.filename}' providing visual closure.",
-            trimmed_reason=None,
-            confidence=0.91,
-            caption_text="Ready for user refinement and timeline inspection."
-        ))
-        current_timeline_time += outro_dur
+            if intro_clip.duration > intro_dur:
+                discarded_summary.append({
+                    "clip": intro_clip.filename,
+                    "range": f"{intro_dur:.1f}s - {intro_clip.duration:.1f}s",
+                    "reason": "Trimmed subsequent speaker monologue to make room for illustrative B-roll action."
+                })
+
+            # --- 2. SEGMENT 2: Dynamic Action B-Roll ---
+            broll_clip = action_clips[0] if action_clips else (clip_analyses[1] if len(clip_analyses) > 1 else clip_analyses[0])
+            broll_in = 1.0 if broll_clip.duration > 5.0 else 0.0
+            broll_dur = min(4.5, max(2.5, broll_clip.duration - broll_in))
+            segments.append(AssemblySegmentDecision(
+                segment_id=f"seg_{uuid.uuid4().hex[:6]}",
+                source_filename=broll_clip.filename,
+                source_filepath=broll_clip.filepath,
+                source_in=broll_in,
+                source_out=broll_in + broll_dur,
+                duration=broll_dur,
+                timeline_start=round(current_timeline_time, 2),
+                timeline_end=round(current_timeline_time + broll_dur, 2),
+                role="Dynamic Action B-Roll",
+                rationale=f"Inserted {broll_dur:.1f}s high-motion sequence from '{broll_clip.filename}' to accelerate visual pacing.",
+                trimmed_reason=f"Omitted static pre-roll ({broll_in:.1f}s) to start directly on peak kinetic movement.",
+                confidence=0.92,
+                caption_text="High-energy visual cut assembled automatically."
+            ))
+            current_timeline_time += broll_dur
+
+            # --- 3. SEGMENT 3: Core Message / Middle Content ---
+            if len(clip_analyses) > 2:
+                core_clip = clip_analyses[2]
+            elif dialogue_clips and intro_clip.duration > 8.0:
+                core_clip = intro_clip
+            else:
+                core_clip = clip_analyses[-1]
+
+            core_in = 4.0 if (core_clip.duration > 8.0 and core_clip.filename == intro_clip.filename) else 0.0
+            core_dur = min(5.0, core_clip.duration - core_in)
+            segments.append(AssemblySegmentDecision(
+                segment_id=f"seg_{uuid.uuid4().hex[:6]}",
+                source_filename=core_clip.filename,
+                source_filepath=core_clip.filepath,
+                source_in=core_in,
+                source_out=core_in + core_dur,
+                duration=core_dur,
+                timeline_start=round(current_timeline_time, 2),
+                timeline_end=round(current_timeline_time + core_dur, 2),
+                role="Core Content Exposition",
+                rationale=f"Included {core_dur:.1f}s from '{core_clip.filename}' to deliver primary informational message.",
+                trimmed_reason="Focused on the highest audio energy section without awkward pauses.",
+                confidence=0.94,
+                caption_text="Examining source media and pacing."
+            ))
+            current_timeline_time += core_dur
+
+            # --- 4. SEGMENT 4: Climax / Outro ---
+            outro_clip = scenic_clips[-1] if scenic_clips else clip_analyses[-1]
+            outro_in = max(0.0, outro_clip.duration - 4.5)
+            outro_dur = round(outro_clip.duration - outro_in, 2)
+            segments.append(AssemblySegmentDecision(
+                segment_id=f"seg_{uuid.uuid4().hex[:6]}",
+                source_filename=outro_clip.filename,
+                source_filepath=outro_clip.filepath,
+                source_in=outro_in,
+                source_out=outro_clip.duration,
+                duration=outro_dur,
+                timeline_start=round(current_timeline_time, 2),
+                timeline_end=round(current_timeline_time + outro_dur, 2),
+                role="Scenic Finale / Outro",
+                rationale=f"Selected concluding {outro_dur:.1f}s from '{outro_clip.filename}' providing visual closure.",
+                trimmed_reason=None,
+                confidence=0.91,
+                caption_text="Ready for user refinement and timeline inspection."
+            ))
+            current_timeline_time += outro_dur
+
+            style_title = {
+                "narrative": "Narrative Highlight Reel",
+                "social": "Fast-Paced Social Cut",
+                "broll": "Interview + B-Roll Assembly",
+                "chronological": "Chronological Story Cut",
+                "custom": "Custom Prompt Assembly"
+            }.get(style, style.capitalize())
 
         # --- Generate Synchronized Subtitles for Assembled Timeline ---
         assembled_subtitles: List[SubtitleItem] = []
@@ -269,13 +320,14 @@ class AssemblyService:
             playhead_time=0.0
         )
 
-        style_title = {
-            "narrative": "Narrative Highlight Reel",
-            "social": "Fast-Paced Social Cut",
-            "broll": "Interview + B-Roll Assembly",
-            "chronological": "Chronological Story Cut",
-            "custom": "Custom Prompt Assembly"
-        }.get(style, style.capitalize())
+        if not style_title:
+            style_title = {
+                "narrative": "Narrative Highlight Reel",
+                "social": "Fast-Paced Social Cut",
+                "broll": "Interview + B-Roll Assembly",
+                "chronological": "Chronological Story Cut",
+                "custom": "Custom Prompt Assembly"
+            }.get(style, style.capitalize())
 
         return MultiClipAssemblyResult(
             assembly_id=assembly_id,
@@ -287,6 +339,6 @@ class AssemblyService:
             segments=segments,
             discarded_summary=discarded_summary,
             subtitles=assembled_subtitles,
-            audio_sync_note="Dialogue source audio preserved on speech segments; B-roll video segments synchronized with ambient audio track.",
+            audio_sync_note=audio_sync_note,
             timeline_state=timeline_state
         )

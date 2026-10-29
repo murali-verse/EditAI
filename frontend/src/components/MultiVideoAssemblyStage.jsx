@@ -30,10 +30,17 @@ export default function MultiVideoAssemblyStage({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [assemblyResult, setAssemblyResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [fableKey, setFableKey] = useState(() => localStorage.getItem('editmind_fable_key') || '');
+  const [showKeyModal, setShowKeyModal] = useState(false);
 
   const batchInputRef = useRef(null);
 
   if (!isOpen) return null;
+
+  const handleSaveFableKey = () => {
+    localStorage.setItem('editmind_fable_key', fableKey.trim());
+    setShowKeyModal(false);
+  };
 
   // Delete a specific clip from assembly stage
   const handleDeleteClip = (indexToDelete) => {
@@ -102,7 +109,7 @@ export default function MultiVideoAssemblyStage({
     }
   };
 
-  // Run AI analysis and auto-assemble
+  // Run AI analysis and auto-assemble with Claude Fable 5.1
   const handleRunAssembly = async () => {
     if (sourceClips.length === 0) {
       setErrorMsg('Please upload or load at least one video clip.');
@@ -117,7 +124,11 @@ export default function MultiVideoAssemblyStage({
         media_files: paths,
         style: selectedStyle,
         user_prompt: customPrompt.trim() || null,
-        include_subtitles: true
+        include_subtitles: true,
+        llm_config: fableKey.trim() ? {
+          provider: 'fable',
+          fable_api_key: fableKey.trim()
+        } : undefined
       });
       setAssemblyResult(res);
     } catch (err) {
@@ -135,18 +146,31 @@ export default function MultiVideoAssemblyStage({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 select-none text-[12px] text-[#a0a4ae]">
-      <div className="bg-[#141518] border border-[#2b2d35] rounded-lg max-w-4xl w-full h-[88vh] overflow-hidden shadow-2xl flex flex-col">
+      <div className="bg-[#141518] border border-[#2b2d35] rounded-lg max-w-4xl w-full h-[88vh] overflow-hidden shadow-2xl flex flex-col relative">
         {/* 1. Header */}
         <div className="h-10 px-4 border-b border-[#212328] flex items-center justify-between bg-[#16171b]">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-[#d4483b]" />
             <span className="font-medium text-[#d8dbe4] text-xs">
-              AI Multi-Video Assembly & Production Studio
+              AI Multi-Video Assembly Studio
             </span>
             <span className="text-[10px] text-[#6b707e] font-mono border-l border-[#24262c] pl-2">
               DaVinci Cut Engine
             </span>
+            <button
+              onClick={() => setShowKeyModal(!showKeyModal)}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded border transition text-[10px] ml-2 ${
+                fableKey
+                  ? 'bg-[#1b2636] border-[#395376] text-[#8ab8f2]'
+                  : 'bg-[#1e2026] border-[#2c2f38] text-[#868a96] hover:text-[#d0d3dc]'
+              }`}
+              title="Configure Claude Fable 5.1 frontier director API key"
+            >
+              <Sparkles className="w-3 h-3 text-[#d48b3b]" />
+              <span>{fableKey ? 'Claude Fable 5.1 Active' : 'Connect Fable 5.1 API'}</span>
+            </button>
           </div>
+
           <button
             onClick={onClose}
             className="p-1 rounded text-[#6f7482] hover:text-[#d0d3dc] hover:bg-[#252830] transition"
@@ -154,6 +178,45 @@ export default function MultiVideoAssemblyStage({
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {/* Fable API Key Popover */}
+        {showKeyModal && (
+          <div className="absolute top-12 left-64 bg-[#181a20] border border-[#2f3340] rounded-lg shadow-2xl p-3 z-50 w-96 space-y-2 text-[11px]">
+            <div className="flex items-center justify-between border-b border-[#262832] pb-1.5">
+              <span className="font-semibold text-[#d8dbe4] flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-[#d48b3b]" />
+                <span>Claude Fable 5.1 Director Setup</span>
+              </span>
+              <button onClick={() => setShowKeyModal(false)} className="text-[#6c707d] hover:text-white">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-[10px] text-[#868a96]">
+              Your Claude Fable 5.1 key powers high-level narrative pacing, scene curation, and audio-video harmonization across all source footage.
+            </p>
+            <input
+              type="password"
+              value={fableKey}
+              onChange={(e) => setFableKey(e.target.value)}
+              placeholder="Paste Anthropic API Key (sk-ant-...) or Fable Key..."
+              className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2.5 py-1.5 text-[10px] focus:outline-none focus:border-[#4f6b95]"
+            />
+            <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#262832]">
+              <button
+                onClick={() => setShowKeyModal(false)}
+                className="px-2.5 py-1 rounded bg-[#202227] hover:bg-[#282a30] text-[#9da1ad] text-[10px]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveFableKey}
+                className="px-3 py-1 rounded bg-[#2b3a4e] hover:bg-[#344863] text-[#e0e3eb] font-medium text-[10px] border border-[#3f5778]"
+              >
+                Save Fable Key
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* 2. Main Content Body */}
         <div className="flex-1 flex overflow-hidden min-h-0">
@@ -324,9 +387,15 @@ export default function MultiVideoAssemblyStage({
                 <>
                   {/* Summary Bar */}
                   <div className="bg-[#191b20] border border-[#25272e] rounded p-2.5 flex items-center justify-between font-mono text-[11px]">
-                    <div>
+                    <div className="flex items-center gap-1.5">
                       <span className="text-[#696e7d]">Production Style: </span>
                       <span className="text-[#d8dbe4] font-medium">{assemblyResult.style}</span>
+                      {assemblyResult.style?.includes('Claude Fable') && (
+                        <span className="px-1.5 py-0.5 rounded bg-[#2a2214] text-[#d48b3b] border border-[#48351a] text-[9px] font-sans font-medium flex items-center gap-1">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          <span>Frontier AI Directed</span>
+                        </span>
+                      )}
                     </div>
                     <div>
                       <span className="text-[#696e7d]">Assembled Duration: </span>
