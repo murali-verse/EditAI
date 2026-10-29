@@ -8,8 +8,10 @@ import AIChatbotPanel from './components/AIChatbotPanel';
 import ExportModal from './components/ExportModal';
 import ProjectListModal from './components/ProjectListModal';
 import BottomPageBar from './components/BottomPageBar';
+import MultiVideoAssemblyStage from './components/MultiVideoAssemblyStage';
 
 import {
+  uploadBatchVideos,
   uploadVideo,
   uploadAudio,
   uploadSubtitle,
@@ -34,7 +36,9 @@ export default function App() {
   const [isEdited, setIsEdited] = useState(false);
   const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
 
-  // Media state
+  // Media Pool state (multiple videos supported)
+  const [mediaPoolVideos, setMediaPoolVideos] = useState([]);
+  const [activeVideoId, setActiveVideoId] = useState(null);
   const [videoMetadata, setVideoMetadata] = useState(null);
   const [videoSrc, setVideoSrc] = useState('');
   const [audioTrack, setAudioTrack] = useState(null);
@@ -72,8 +76,41 @@ export default function App() {
   ]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
 
-  // Export modal
+  // Export & Assembly modals
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [isAssemblyStageOpen, setIsAssemblyStageOpen] = useState(false);
+  const [sourceClips, setSourceClips] = useState([]);
+  const [assemblyResult, setAssemblyResult] = useState(null);
+  const [activePage, setActivePage] = useState('edit');
+
+  // Handle Multi-Video AI Assembly application
+  const handleApplyAssembly = (result) => {
+    setAssemblyResult(result);
+    setTimeline(result.timeline_state);
+    setSubtitles(result.subtitles || []);
+
+    if (result.timeline_state && result.timeline_state.clips.length > 0) {
+      const firstClip = result.timeline_state.clips[0];
+      setVideoSrc(firstClip.stream_url || '');
+      setVideoMetadata({
+        filename: `Assembled Production (${result.style})`,
+        duration: result.total_duration,
+        width: 1920,
+        height: 1080,
+        fps: 25.0,
+        has_audio: true,
+        filepath: firstClip.source_file,
+      });
+    }
+
+    setCurrentTime(0.0);
+    setActiveRightTab('inspector');
+    setIsEdited(true);
+    addChatMessage(
+      'assistant',
+      `✨ Assembled ${result.segments.length} sequential cuts into timeline using "${result.style}".\n• Audio and subtitles synchronized across all cuts.\n• Sequence mounted as editable clips on the timeline.\n• You can now scrub, split, trim, delete, reorder, or refine via natural language chatbot.`
+    );
+  };
 
   // Add message helper
   const addChatMessage = useCallback((sender, text, extra = {}) => {
@@ -153,23 +190,126 @@ export default function App() {
     }
   };
 
-  // 5. Upload Video
-  const handleUploadVideo = async (file) => {
+  // 5. Upload Multiple Videos to Media Pool
+  const handleUploadVideos = async (files) => {
     try {
-      const res = await uploadVideo(file);
-      setVideoMetadata(res.metadata);
-      setTimeline(res.timeline);
-      setVideoSrc(res.stream_url);
-      setCurrentTime(0.0);
-      setAnalysis(null);
-      setIsEdited(true);
+      const res = await uploadBatchVideos(files);
+      if (!res.items || res.items.length === 0) return;
+
+      const newClips = res.items.map((item) => ({
+        id: item.id || `media_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        filename: item.filename,
+        filepath: item.filepath,
+        stream_url: item.stream_url,
+        metadata: item.metadata
+      }));
+
+      setMediaPoolVideos((prev) => [...prev, ...newClips]);
+      setSourceClips((prev) => [...prev, ...newClips]);
+
+      // If no active video yet, set first as active
+      if (!videoMetadata && newClips.length > 0) {
+        const first = newClips[0];
+        setVideoMetadata(first.metadata);
+        setVideoSrc(first.stream_url);
+        setActiveVideoId(first.id);
+
+        if (timeline.clips.length === 0) {
+          setTimeline({
+            clips: [
+              {
+                id: `clip_${Date.now()}`,
+                source_file: first.filepath,
+                source_filename: first.filename,
+                source_start: 0.0,
+                source_end: first.metadata.duration,
+                timeline_start: 0.0,
+                timeline_end: first.metadata.duration,
+                duration: first.metadata.duration,
+                name: first.filename,
+                speed: 1.0,
+                volume: 1.0,
+                stream_url: first.stream_url,
+                color: '#2b3a4e'
+              }
+            ],
+            total_duration: first.metadata.duration,
+            selected_clip_id: null,
+            selection_range: null,
+            audio_track: null,
+            subtitles: [],
+            playhead_time: 0.0
+          });
+        }
+      }
+
       addChatMessage(
         'assistant',
-        `Imported video "${file.name}" (${res.metadata.duration.toFixed(1)}s, ${res.metadata.width}x${res.metadata.height}, ${res.metadata.fps} fps).`
+        `Imported ${newClips.length} video(s) into Media Pool.`
       );
+      setIsEdited(true);
     } catch (err) {
       addChatMessage('assistant', `Import error: ${err.message}`, { isError: true });
     }
+  };
+
+  // Select video to preview in viewer
+  const handleSelectVideo = (clip) => {
+    if (!clip || !clip.metadata) return;
+    setVideoMetadata(clip.metadata);
+    setVideoSrc(clip.stream_url);
+    setActiveVideoId(clip.id);
+  };
+
+  // Insert a Media Pool video directly into timeline
+  const handleInsertVideoToTimeline = (clip) => {
+    if (!clip || !clip.metadata) return;
+    const curEnd = timeline.total_duration;
+    const dur = clip.metadata.duration;
+    const newClip = {
+      id: `clip_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      source_file: clip.filepath,
+      source_filename: clip.filename,
+      source_start: 0.0,
+      source_end: dur,
+      timeline_start: curEnd,
+      timeline_end: +(curEnd + dur).toFixed(2),
+      duration: dur,
+      name: clip.filename,
+      speed: 1.0,
+      volume: 1.0,
+      stream_url: clip.stream_url,
+      color: '#2b3a4e'
+    };
+
+    setTimeline((prev) => ({
+      ...prev,
+      clips: [...prev.clips, newClip],
+      total_duration: +(curEnd + dur).toFixed(2)
+    }));
+    setIsEdited(true);
+    addChatMessage('assistant', `Appended "${clip.filename}" (${dur.toFixed(1)}s) to timeline.`);
+  };
+
+  // Remove individual video from Media Pool
+  const handleRemoveMediaPoolVideo = (clipId) => {
+    setMediaPoolVideos((prev) => {
+      const updated = prev.filter((v) => v.id !== clipId);
+      if (activeVideoId === clipId) {
+        if (updated.length > 0) {
+          setVideoMetadata(updated[0].metadata);
+          setVideoSrc(updated[0].stream_url);
+          setActiveVideoId(updated[0].id);
+        } else {
+          setVideoMetadata(null);
+          setVideoSrc('');
+          setActiveVideoId(null);
+        }
+      }
+      return updated;
+    });
+    setSourceClips((prev) => prev.filter((c) => c.id !== clipId));
+    setIsEdited(true);
   };
 
   // 6. Upload Audio
@@ -209,6 +349,17 @@ export default function App() {
       setCurrentTime(0.0);
       setAnalysis(null);
       setIsEdited(true);
+
+      const sampleItem = {
+        id: 'media_sample_demo',
+        filename: res.metadata.filename,
+        filepath: res.metadata.filepath,
+        stream_url: res.stream_url,
+        metadata: res.metadata
+      };
+      setMediaPoolVideos([sampleItem]);
+      setActiveVideoId('media_sample_demo');
+
       addChatMessage(
         'assistant',
         'Loaded demo sample: 30.0s multi-scene video + synchronized SRT subtitles.'
@@ -223,6 +374,8 @@ export default function App() {
     if (type === 'video') {
       setVideoMetadata(null);
       setVideoSrc('');
+      setActiveVideoId(null);
+      setMediaPoolVideos([]);
       setTimeline({ clips: [], total_duration: 0.0, selected_clip_id: null, selection_range: null, subtitles: [], playhead_time: 0 });
       setAnalysis(null);
       setIsEdited(true);
@@ -256,8 +409,8 @@ export default function App() {
     }
   };
 
-  // 11. Send Chatbot Command
-  const handleSendCommand = async (prompt) => {
+  // 11. Send Chatbot Command with optional LLM config
+  const handleSendCommand = async (prompt, llmConfig = null) => {
     addChatMessage('user', prompt);
     setIsChatProcessing(true);
 
@@ -267,6 +420,7 @@ export default function App() {
         current_timeline: timeline,
         media_metadata: videoMetadata,
         scenes: analysis?.scenes || [],
+        llm_config: llmConfig,
       });
 
       if (res.intent === 'play') {
@@ -426,6 +580,7 @@ export default function App() {
         onAnalyze={handleAnalyze}
         isAnalyzing={isAnalyzing}
         onOpenExport={() => setIsExportOpen(true)}
+        onOpenAssemblyStage={() => setIsAssemblyStageOpen(true)}
         onLoadSample={handleLoadSample}
         hasMedia={!!videoMetadata}
         activeRightTab={activeRightTab}
@@ -438,13 +593,17 @@ export default function App() {
         {/* Left: Media Pool */}
         <div className="w-80 shrink-0 h-full border-r border-[#212328]">
           <MediaImportPanel
-            videoMetadata={videoMetadata}
+            mediaPoolVideos={mediaPoolVideos}
+            activeVideoId={activeVideoId}
             audioTrack={audioTrack}
             subtitles={subtitles}
-            onUploadVideo={handleUploadVideo}
+            onUploadVideos={handleUploadVideos}
             onUploadAudio={handleUploadAudio}
             onUploadSubtitle={handleUploadSubtitle}
+            onRemoveVideo={handleRemoveMediaPoolVideo}
             onRemoveMedia={handleRemoveMedia}
+            onSelectVideo={handleSelectVideo}
+            onInsertVideoToTimeline={handleInsertVideoToTimeline}
           />
         </div>
 
@@ -472,6 +631,7 @@ export default function App() {
                 selectedClip={selectedClip}
                 timeline={timeline}
                 analysis={analysis}
+                assemblyResult={assemblyResult}
                 onSeekToScene={handleSeekToScene}
                 onUpdateClipSpeed={(id, spd) => {
                   setTimeline((prev) => ({
@@ -521,9 +681,31 @@ export default function App() {
       </div>
 
       {/* 4. Bottom DaVinci Page Switcher */}
-      <BottomPageBar activePage="edit" />
+      <BottomPageBar
+        activePage={activePage}
+        onSelectPage={(page) => {
+          setActivePage(page);
+          if (page === 'cut') {
+            setIsAssemblyStageOpen(true);
+          } else if (page === 'deliver') {
+            setIsExportOpen(true);
+          }
+        }}
+      />
 
       {/* 5. Modals */}
+      <MultiVideoAssemblyStage
+        isOpen={isAssemblyStageOpen}
+        onClose={() => {
+          setIsAssemblyStageOpen(false);
+          setActivePage('edit');
+        }}
+        onApplyAssembly={handleApplyAssembly}
+        sourceClips={sourceClips}
+        setSourceClips={setSourceClips}
+        mediaPoolVideos={mediaPoolVideos}
+      />
+
       <ExportModal
         isOpen={isExportOpen}
         onClose={() => setIsExportOpen(false)}

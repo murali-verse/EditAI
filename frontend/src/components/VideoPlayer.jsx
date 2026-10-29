@@ -35,56 +35,75 @@ export default function VideoPlayer({
   const [aspectGuide, setAspectGuide] = useState('9:16'); // '9:16' | '16:9' | '1:1' | 'none'
   const [vuLevel, setVuLevel] = useState({ left: -45, right: -45 });
 
+  // Find active clip at timeline time
+  const getActiveClipAtTime = useCallback((tlTime) => {
+    if (!timeline || !timeline.clips || timeline.clips.length === 0) return null;
+    return (
+      timeline.clips.find(
+        (c) => tlTime >= c.timeline_start && tlTime < c.timeline_end
+      ) || timeline.clips[timeline.clips.length - 1]
+    );
+  }, [timeline]);
+
+  const activeClip = getActiveClipAtTime(currentTime);
+  const activeClipSrc = activeClip?.stream_url || videoSrc;
+
   // Map timeline time to video source time
   const getSourceTimeForTimelineTime = useCallback((tlTime) => {
     if (!timeline || !timeline.clips || timeline.clips.length === 0) {
       return tlTime;
     }
-    for (const clip of timeline.clips) {
-      if (tlTime >= clip.timeline_start && tlTime <= clip.timeline_end) {
-        const offset = tlTime - clip.timeline_start;
-        return clip.source_start + (offset * (clip.speed || 1.0));
-      }
-    }
-    return 0;
-  }, [timeline]);
+    const clip = getActiveClipAtTime(tlTime);
+    if (!clip) return 0;
+    const offset = Math.max(0, tlTime - clip.timeline_start);
+    return clip.source_start + (offset * (clip.speed || 1.0));
+  }, [timeline, getActiveClipAtTime]);
 
   // Map video source time to timeline time
   const getTimelineTimeForSourceTime = useCallback((srcTime) => {
     if (!timeline || !timeline.clips || timeline.clips.length === 0) {
       return srcTime;
     }
-    for (const clip of timeline.clips) {
-      if (srcTime >= clip.source_start && srcTime <= clip.source_end) {
-        const offset = (srcTime - clip.source_start) / (clip.speed || 1.0);
-        return clip.timeline_start + offset;
-      }
-    }
-    return currentTime;
-  }, [timeline, currentTime]);
+    const clip = getActiveClipAtTime(currentTime);
+    if (!clip) return currentTime;
+    const offset = (srcTime - clip.source_start) / (clip.speed || 1.0);
+    return Math.max(clip.timeline_start, Math.min(clip.timeline_end, clip.timeline_start + offset));
+  }, [timeline, currentTime, getActiveClipAtTime]);
 
   // Synchronize HTML5 video element when currentTime changes externally
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoSrc) return;
+    if (!video || !activeClipSrc) return;
 
     const expectedSourceTime = getSourceTimeForTimelineTime(currentTime);
     if (Math.abs(video.currentTime - expectedSourceTime) > 0.3) {
       video.currentTime = expectedSourceTime;
     }
-  }, [currentTime, getSourceTimeForTimelineTime, videoSrc]);
+  }, [currentTime, getSourceTimeForTimelineTime, activeClipSrc]);
+
+  // Handle active video source change across clips
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !activeClipSrc) return;
+
+    const expectedSourceTime = getSourceTimeForTimelineTime(currentTime);
+    video.currentTime = expectedSourceTime;
+    if (isPlaying) {
+      video.play().catch(() => {});
+    }
+  }, [activeClipSrc]);
 
   // Play / Pause sync
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !videoSrc) return;
+    if (!video || !activeClipSrc) return;
 
     if (isPlaying) {
       video.play().catch(() => setIsPlaying(false));
     } else {
       video.pause();
     }
-  }, [isPlaying, videoSrc, setIsPlaying]);
+  }, [isPlaying, activeClipSrc, setIsPlaying]);
 
   // Subtitle synchronization
   useEffect(() => {
@@ -124,6 +143,19 @@ export default function VideoPlayer({
     const currentSrcTime = video.currentTime;
     let nextTimelineTime = getTimelineTimeForSourceTime(currentSrcTime);
 
+    // Check if we reached the end of the current clip in a multi-clip timeline
+    const active = getActiveClipAtTime(currentTime);
+    if (active && timeline?.clips?.length > 1) {
+      if (nextTimelineTime >= active.timeline_end - 0.08) {
+        const clipIdx = timeline.clips.findIndex((c) => c.id === active.id);
+        if (clipIdx !== -1 && clipIdx < timeline.clips.length - 1) {
+          const nextClip = timeline.clips[clipIdx + 1];
+          onTimeUpdate(nextClip.timeline_start);
+          return;
+        }
+      }
+    }
+
     if (playbackRange) {
       const [start, end] = playbackRange;
       if (nextTimelineTime >= end || nextTimelineTime < start) {
@@ -151,6 +183,24 @@ export default function VideoPlayer({
     }
 
     onTimeUpdate(nextTimelineTime);
+  };
+
+  const handleVideoEnded = () => {
+    const active = getActiveClipAtTime(currentTime);
+    if (active && timeline?.clips?.length > 1) {
+      const clipIdx = timeline.clips.findIndex((c) => c.id === active.id);
+      if (clipIdx !== -1 && clipIdx < timeline.clips.length - 1) {
+        const nextClip = timeline.clips[clipIdx + 1];
+        onTimeUpdate(nextClip.timeline_start);
+        return;
+      }
+    }
+    if (isLooping) {
+      jumpToStart();
+      if (isPlaying) videoRef.current?.play().catch(() => {});
+    } else {
+      setIsPlaying(false);
+    }
   };
 
   // Step 1 frame backward / forward
@@ -191,12 +241,12 @@ export default function VideoPlayer({
       <div className="flex-1 relative flex overflow-hidden bg-[#0a0a0c]">
         {/* Main Video Screen */}
         <div className="flex-1 relative flex items-center justify-center overflow-hidden">
-          {videoSrc ? (
+          {activeClipSrc ? (
             <video
               ref={videoRef}
-              src={videoSrc}
+              src={activeClipSrc}
               onTimeUpdate={handleTimeUpdate}
-              onEnded={() => setIsPlaying(false)}
+              onEnded={handleVideoEnded}
               className="w-full h-full object-contain max-h-[58vh]"
               playsInline
             />

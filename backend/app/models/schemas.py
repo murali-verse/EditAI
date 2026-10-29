@@ -59,6 +59,10 @@ class Clip(BaseModel):
     speed: float = 1.0
     volume: float = 1.0
     color: Optional[str] = "#3b82f6"
+    stream_url: Optional[str] = None
+    role: Optional[str] = None
+    editorial_rationale: Optional[str] = None
+    trimmed_reason: Optional[str] = None
 
 class SubtitleItem(BaseModel):
     id: int
@@ -96,6 +100,7 @@ class ChatbotCommandRequest(BaseModel):
     media_metadata: Optional[MediaMetadata] = None
     scenes: Optional[List[SceneSegment]] = None
     confirm_destructive: bool = False
+    llm_config: Optional[Dict[str, Any]] = None
 
 class ChatbotCommandResponse(BaseModel):
     understood: bool
@@ -109,6 +114,7 @@ class ChatbotCommandResponse(BaseModel):
     prompt_for_clarification: Optional[str] = None
     action_description: Optional[str] = None
     action_proposal: Optional[Dict[str, Any]] = None
+    llm_provider: Optional[str] = None
 
 class ExportRequest(BaseModel):
     timeline: TimelineState
@@ -127,3 +133,60 @@ class ExportResponse(BaseModel):
     duration: float
     size_bytes: int
     message: str
+
+# ----------------------------------------------------
+# MULTI-CLIP ANALYSIS & INTELLIGENT ASSEMBLY SCHEMAS
+# ----------------------------------------------------
+
+class SourceClipAnalysis(BaseModel):
+    media_id: str
+    filename: str
+    filepath: str
+    duration: float
+    width: int
+    height: int
+    fps: float
+    has_audio: bool
+    scenes: List[SceneSegment] = []
+    content_tags: List[str] = []
+    primary_category: str = "general"  # "dialogue", "action_broll", "scenic_broll", "presentation"
+    motion_level: str = "medium"        # "high", "medium", "low"
+    quality_score: float = 0.85
+    speech_summary: str = ""
+    silences_count: int = 0
+    limitations: List[str] = []
+
+class AssemblySegmentDecision(BaseModel):
+    segment_id: str
+    source_filename: str
+    source_filepath: str
+    source_in: float
+    source_out: float
+    duration: float
+    timeline_start: float
+    timeline_end: float
+    role: str                       # "Hook / Intro", "Core Message", "B-Roll Action", "Scenic Climax", "Finale Outro"
+    rationale: str                  # Editorial explanation of why this was selected
+    trimmed_reason: Optional[str] = None  # What was trimmed before/after
+    confidence: float = 0.9
+    caption_text: Optional[str] = None
+
+class MultiClipAssemblyResult(BaseModel):
+    assembly_id: str
+    style: str
+    user_prompt: Optional[str] = None
+    total_duration: float
+    source_clips_analyzed: int
+    clip_analyses: List[SourceClipAnalysis] = []
+    segments: List[AssemblySegmentDecision] = []
+    discarded_summary: List[Dict[str, Any]] = []
+    subtitles: List[SubtitleItem] = []
+    audio_sync_note: str = ""
+    timeline_state: TimelineState
+
+class AssemblyRequest(BaseModel):
+    media_files: List[str]
+    style: str = "narrative"  # "narrative", "social", "broll", "chronological", "custom"
+    user_prompt: Optional[str] = None
+    target_duration: Optional[float] = None
+    include_subtitles: bool = True

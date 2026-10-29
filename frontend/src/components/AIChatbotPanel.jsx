@@ -5,8 +5,13 @@ import {
   CheckCircle2,
   AlertCircle,
   Undo2,
-  Play
+  Play,
+  Settings,
+  Key,
+  Cpu,
+  X
 } from 'lucide-react';
+import { getLLMProviders } from '../api';
 
 export default function AIChatbotPanel({
   chatMessages,
@@ -17,23 +22,55 @@ export default function AIChatbotPanel({
   onCancelProposal
 }) {
   const [inputText, setInputText] = useState('');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [llmProvider, setLlmProvider] = useState(() => localStorage.getItem('editmind_llm_provider') || 'auto');
+  const [geminiKey, setGeminiKey] = useState(() => localStorage.getItem('editmind_gemini_key') || '');
+  const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('editmind_openai_key') || '');
+  const [availableProviders, setAvailableProviders] = useState(null);
+
   const messagesEndRef = useRef(null);
 
+  useEffect(() => {
+    async function loadProviders() {
+      try {
+        const info = await getLLMProviders();
+        setAvailableProviders(info);
+      } catch (e) {
+        // ignore
+      }
+    }
+    loadProviders();
+  }, []);
+
+  const handleSaveSettings = () => {
+    localStorage.setItem('editmind_llm_provider', llmProvider);
+    localStorage.setItem('editmind_gemini_key', geminiKey);
+    localStorage.setItem('editmind_openai_key', openaiKey);
+    setIsSettingsOpen(false);
+  };
+
   const quickPrompts = [
-    'Select the clip from 00:10 to 00:25.',
-    'Split at 00:18.',
-    'Delete the selected segment.',
-    'Split the selected clip at its midpoint.',
-    'Delete the second half of the selected clip.',
-    'Trim the video from 00:10 to 01:20.',
-    'Play the video.',
-    'Export the edited video.'
+    'Split the second clip in half',
+    'Remove the first 4 seconds',
+    'Delete the selected segment',
+    'Speed up clip 1 to 1.5x',
+    'Mute audio',
+    'Select clip from 00:10 to 00:25',
+    'Jump to scene 2',
+    'Export the edited video'
   ];
 
   const handleSend = (e) => {
     e?.preventDefault();
     if (!inputText.trim() || isProcessing) return;
-    onSendCommand(inputText.trim());
+
+    const config = {
+      provider: llmProvider,
+      api_key: geminiKey.trim() || undefined,
+      openai_api_key: openaiKey.trim() || undefined
+    };
+
+    onSendCommand(inputText.trim(), config);
     setInputText('');
   };
 
@@ -41,16 +78,115 @@ export default function AIChatbotPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  const activeBadgeLabel =
+    llmProvider === 'gemini' && geminiKey
+      ? 'Gemini Flash'
+      : llmProvider === 'openai' && openaiKey
+      ? 'OpenAI/Groq'
+      : availableProviders?.ollama_ready
+      ? `Ollama (${availableProviders.ollama_models?.[0] || 'Local'})`
+      : 'Smart Semantic AI';
+
   return (
-    <div className="h-full flex flex-col bg-[#141518] text-[#a0a4ae] select-none text-[11px]">
-      {/* 1. Header */}
+    <div className="h-full flex flex-col bg-[#141518] text-[#a0a4ae] select-none text-[11px] relative">
+      {/* 1. Header with LLM indicator & settings */}
       <div className="h-7 px-3 border-b border-[#212328] flex items-center justify-between bg-[#18191d] text-[10px]">
         <div className="flex items-center gap-1.5 text-[#d0d3dc] font-medium">
           <Sparkles className="w-3 h-3 text-[#d48b3b]" />
           <span>EditMind Assistant</span>
         </div>
-        <span className="text-[9px] text-[#696e7d] font-mono">Local NLE Engine</span>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#1e2026] hover:bg-[#282a32] text-[#868a96] hover:text-[#d0d3dc] border border-[#2b2d35] transition"
+            title="Configure LLM Provider (Gemini / OpenAI / Ollama / Semantic)"
+          >
+            <Cpu className="w-2.5 h-2.5 text-[#7ea5dc]" />
+            <span className="text-[9px] font-mono">{activeBadgeLabel}</span>
+            <Settings className="w-2.5 h-2.5 ml-0.5" />
+          </button>
+        </div>
       </div>
+
+      {/* LLM Configuration Popover Modal */}
+      {isSettingsOpen && (
+        <div className="absolute top-8 inset-x-2 bg-[#18191e] border border-[#2e313c] rounded-lg shadow-2xl p-3 z-40 space-y-2.5 text-[11px]">
+          <div className="flex items-center justify-between border-b border-[#24262f] pb-1.5">
+            <span className="font-semibold text-[#d8dbe4] flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3 text-[#d48b3b]" />
+              <span>LLM Engine Settings</span>
+            </span>
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="text-[#6c707d] hover:text-white"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[10px] text-[#868a96] mb-1">Provider:</label>
+              <select
+                value={llmProvider}
+                onChange={(e) => setLlmProvider(e.target.value)}
+                className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2 py-1 text-[11px] focus:outline-none"
+              >
+                <option value="auto">Smart Semantic Reasoner (Fast & Local)</option>
+                <option value="gemini">Google Gemini (Gemini 1.5/2.0 Flash)</option>
+                <option value="openai">OpenAI / Groq API</option>
+                <option value="ollama">Ollama Local ({availableProviders?.ollama_models?.[0] || 'Auto-detect'})</option>
+              </select>
+            </div>
+
+            {llmProvider === 'gemini' && (
+              <div>
+                <label className="block text-[10px] text-[#868a96] mb-1">
+                  Gemini API Key:
+                </label>
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder="Paste Google AI Studio API Key..."
+                  className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2 py-1 text-[10px] focus:outline-none"
+                />
+              </div>
+            )}
+
+            {llmProvider === 'openai' && (
+              <div>
+                <label className="block text-[10px] text-[#868a96] mb-1">
+                  OpenAI or Groq API Key:
+                </label>
+                <input
+                  type="password"
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                  placeholder="Paste gsk_ or sk- key..."
+                  className="w-full bg-[#121316] text-[#d8dbe4] border border-[#272932] rounded px-2 py-1 text-[10px] focus:outline-none"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-1 border-t border-[#24262f]">
+            <button
+              onClick={() => setIsSettingsOpen(false)}
+              className="px-2.5 py-1 rounded bg-[#202227] hover:bg-[#282a30] text-[#9da1ad] text-[10px]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveSettings}
+              className="px-3 py-1 rounded bg-[#2b3a4e] hover:bg-[#344863] text-[#e0e3eb] font-medium text-[10px] border border-[#3f5778]"
+            >
+              Save Engine
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 2. Chat Log Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
@@ -71,7 +207,7 @@ export default function AIChatbotPanel({
               {/* Header */}
               <div className="flex items-center gap-1.5 mb-1 text-[9px] text-[#6b707e]">
                 <span className="font-semibold text-[#8b90a0]">
-                  {msg.sender === 'assistant' ? 'Assistant' : 'Editor'}
+                  {msg.sender === 'assistant' ? 'EditMind AI' : 'Editor'}
                 </span>
                 <span>• {msg.timestamp}</span>
               </div>
@@ -79,7 +215,7 @@ export default function AIChatbotPanel({
               {/* Message text */}
               <p className="whitespace-pre-wrap">{msg.text}</p>
 
-              {/* Proposed Action Card (if action proposal present) */}
+              {/* Action Proposal Card */}
               {msg.actionProposal && (
                 <div className="mt-2 pt-1.5 border-t border-[#2d303a] bg-[#141519] p-2 rounded border border-[#242630] space-y-1.5">
                   <div className="flex items-center justify-between text-[10px] text-[#d0d3dc] font-medium">
@@ -88,15 +224,9 @@ export default function AIChatbotPanel({
                       <span>{msg.actionProposal.title || 'Proposed Timeline Edit'}</span>
                     </span>
                   </div>
-
-                  {msg.actionProposal.time && (
-                    <p className="text-[10px] font-mono text-[#8a8f9e]">
-                      Target Time: <span className="text-[#c4c7d2]">{msg.actionProposal.time}</span>
-                    </p>
-                  )}
-                  {msg.actionProposal.range && (
-                    <p className="text-[10px] font-mono text-[#8a8f9e]">
-                      Target Range: <span className="text-[#c4c7d2]">{msg.actionProposal.range}</span>
+                  {msg.actionProposal.details && (
+                    <p className="text-[10px] text-[#8a8f9e]">
+                      {msg.actionProposal.details}
                     </p>
                   )}
                 </div>
@@ -116,7 +246,7 @@ export default function AIChatbotPanel({
         {isProcessing && (
           <div className="text-[10px] text-[#717582] italic bg-[#1a1b20] px-2 py-1.5 rounded border border-[#24262f] w-fit flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-[#d48b3b] animate-ping" />
-            <span>Processing editing instruction...</span>
+            <span>Reasoning and executing edit...</span>
           </div>
         )}
 
@@ -144,7 +274,7 @@ export default function AIChatbotPanel({
           type="text"
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
-          placeholder='e.g. "Split at 00:18", "Delete selected segment"...'
+          placeholder='e.g. "Split second clip in half", "Remove the first 4s"...'
           disabled={isProcessing}
           className="flex-1 bg-[#1a1c22] text-[11px] text-[#d8dbe4] placeholder-[#555a66] rounded px-2.5 py-1.5 border border-[#282b34] focus:outline-none focus:border-[#424653] transition"
         />

@@ -181,6 +181,14 @@ class TimelineManager:
 
         return new_timeline, f"Deleted clip '{target_clip.name}' ({cut_duration:.2f}s removed)."
 
+    def delete_selection(self, timeline: TimelineState) -> Tuple[TimelineState, str]:
+        """Alias for delete_selected_clip."""
+        return self.delete_selected_clip(timeline)
+
+    def split_at(self, timeline: TimelineState, split_time: float) -> Tuple[TimelineState, str]:
+        """Alias for split_clip."""
+        return self.split_clip(timeline, split_time)
+
     def cut_selection(self, timeline: TimelineState) -> Tuple[TimelineState, str]:
         """
         Removes selected section, copies it to clipboard/undo history, and ripples timeline.

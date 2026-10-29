@@ -101,29 +101,43 @@ npm run dev
 
 ---
 
-## 🎬 Testing the Workflow (9-Step Demonstration)
+## 🎬 Testing the Workflow (Multi-Video AI Assembly & Timeline Refinement)
 
-1. **Import Media**: Click **"Load Demo Sample"** in the top bar (or drag and drop your video file into the Media Pool). A 30s multi-scene video with subtitles is loaded.
-2. **Analyze Video**: Click **"Analyze"** in the top toolbar. The analysis engine detects scene boundaries, audio silences, and visual motion.
-3. **Select Clip Range**: In the **AI Assistant** panel, enter:
-   ```text
-   Select the clip from 00:10 to 00:25.
-   ```
-   *The timeline highlights the 10s–25s range.*
-4. **Split Clip**: In the AI Assistant, enter:
-   ```text
-   Split at 00:18.
-   ```
-   *The clip splits into two independent clips at 18.00s.*
-5. **Delete Segment**: In the AI Assistant, enter:
-   ```text
-   Delete the selected segment.
-   ```
-   *The segment is removed, following clips ripple forward, and timeline duration updates to 15.00s.*
-6. **Preview Updated Video**: Press **Spacebar** or click **Play**. The player previews the edited sequence according to the updated EDL timeline.
-7. **Subtitle Synchronization**: Subtitles adjust automatically after the cut. Subtitles in the deleted range are removed, and subsequent subtitles shift forward.
-8. **Export Edited Video**: In the AI Assistant, enter `Export the edited video.` (or click **"Quick Export"** in the top bar). Choose your aspect ratio (16:9, 9:16 vertical, or 1:1 square) and click **Export**. Download the resulting MP4.
-9. **Project Persistence**: Click **Save** in the top bar or let autosave run. Open the **Project Manager** to see your project stored in SQLite.
+### Multi-Video AI Assembly Stage (Cut Page)
+1. **Open AI Auto-Assemble**: Click **"AI Auto-Assemble"** in the top toolbar or click the **"Cut"** page icon in the bottom page bar.
+2. **Batch Ingest Source Media**: Click **"Load 3-Clip Demo Pack"** (or upload multiple custom video files simultaneously).
+   - *Clip 1: Interview & Dialogue (12.0s)* — Keynote speaker monologue.
+   - *Clip 2: Dynamic Action B-Roll (10.0s)* — High kinetic movement & transition b-roll.
+   - *Clip 3: Scenic Presentation & Outro (10.0s)* — Atmospheric visuals.
+3. **Select Narrative Assembly Style**:
+   - `Narrative Highlight Reel` (hook dialogue -> action b-roll -> core message -> scenic closure)
+   - `Fast-Paced Social Cut` (punchy, high-tempo kinetic cuts)
+   - `Interview + B-Roll Assembly` (dialogue anchor with illustrative cutaways)
+   - `Chronological Cut` (temporal progression)
+4. **Enter Optional Natural-Language Directives**: e.g., *"Emphasize high action b-roll and opening dialogue"*.
+5. **Analyze & Assemble Sequence**: Click **"Analyze & Assemble Sequence"**.
+   - The AI multimodal analyzer runs OpenCV/PySceneDetect scene detection, motion scoring, audio silence detection, and quality tagging across all clips.
+   - The LLM/Heuristic sequence engine constructs an Edit Decision List (EDL) with **explicit editorial rationales** explaining why each cut was selected and what pre-roll/post-roll was trimmed.
+   - Generates synchronized timeline subtitles and audio alignment notes.
+6. **Mount to Timeline**: Click **"Apply to Timeline & Open Editor"**.
+   - The assembled production is mounted directly onto the interactive multi-track timeline as individual editable clips.
+7. **Timeline Inspection & Full Refinement**:
+   - Click any cut on the timeline to inspect its **Source Filename**, **AI Role**, **Editorial Rationale**, and **Trimmed Reason** in the Inspector.
+   - User has complete creative freedom: trim in/out points, split clips (`S` key or blade tool), delete segments (`Delete` key), adjust playback speed (0.25x - 3.0x), adjust volume, or reorder clips.
+8. **Natural-Language Chatbot Refinement**:
+   - In the **AI Assistant** panel, instruct:
+     - *"Select the clip from 00:05 to 00:09."*
+     - *"Split at 00:07."*
+     - *"Delete the second half of the selected clip."*
+     - *"Undo the last edit."*
+9. **Multi-Aspect Ratio MP4 Export**:
+   - Click **"Quick Export"** (or type *"Export the edited video"* in the AI chat).
+   - Select desired aspect ratio:
+     - `16:9 Landscape` (1920x1080)
+     - `9:16 Vertical` (1080x1920 with Center Crop or Letterbox Fit for TikTok/Reels/Shorts)
+     - `1:1 Square` (1080x1080)
+   - Toggle subtitle burn-in and audio track mixing.
+   - Click **"Render & Download MP4"** to produce the final playable video file.
 
 ---
 
@@ -132,9 +146,12 @@ npm run dev
 Run the backend test suites to verify full functionality:
 
 ```bash
-# 1. End-to-end workflow test (sample load, analysis, chatbot split, delete, ripple, and FFmpeg MP4 export)
+# 1. Multi-clip AI sequence assembly test (pack load, multimodal analysis, EDL assembly, rationales, timeline mount)
+python backend/tests/test_assembly.py
+
+# 2. End-to-end workflow test (sample load, analysis, chatbot split, delete, ripple, and FFmpeg MP4 export)
 python backend/tests/test_workflow.py
 
-# 2. SQLite persistence test (create project, save clips, reload from DB)
+# 3. SQLite persistence test (create project, save clips, reload from DB)
 python backend/tests/test_persistence.py
 ```

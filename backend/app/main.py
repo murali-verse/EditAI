@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import BASE_DIR, UPLOAD_DIR, EXPORT_DIR, SAMPLE_DIR, THUMBNAIL_DIR
-from app.routes import media, analysis, chatbot, timeline, export, projects
+from app.routes import media, analysis, chatbot, timeline, export, projects, assembly
 
 app = FastAPI(
     title="AI Video Studio Backend",
@@ -34,6 +34,7 @@ app.include_router(chatbot.router)
 app.include_router(timeline.router)
 app.include_router(export.router)
 app.include_router(projects.router)
+app.include_router(assembly.router)
 
 @app.get("/api/health")
 async def health_check():

@@ -1,5 +1,6 @@
 import os
 import shutil
+import uuid
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Optional
@@ -19,6 +20,34 @@ from sample_media.generate_samples import generate_sample_assets
 
 router = APIRouter(prefix="/api/media", tags=["Media"])
 timeline_manager = TimelineManager()
+
+@router.post("/upload/batch")
+async def upload_batch_videos(files: list[UploadFile] = File(...)):
+    """Uploads multiple video files simultaneously for multi-clip assembly."""
+    uploaded_items = []
+    for f in files:
+        ext = Path(f.filename).suffix.lower()
+        if ext not in ALLOWED_VIDEO_EXTENSIONS:
+            continue
+        clean_filename = f"vid_{Path(f.filename).name}"
+        save_path = UPLOAD_DIR / clean_filename
+        with open(save_path, "wb") as buffer:
+            shutil.copyfileobj(f.file, buffer)
+
+        meta = VideoService.probe_media(str(save_path))
+        uploaded_items.append({
+            "id": f"media_{uuid.uuid4().hex[:8]}",
+            "filename": f.filename,
+            "filepath": str(save_path.resolve()),
+            "stream_url": f"/media_files/uploads/{clean_filename}",
+            "metadata": meta
+        })
+
+    return {
+        "success": True,
+        "count": len(uploaded_items),
+        "items": uploaded_items
+    }
 
 @router.post("/upload/video")
 async def upload_video(file: UploadFile = File(...)):

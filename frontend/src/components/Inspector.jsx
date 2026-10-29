@@ -6,6 +6,7 @@ export default function Inspector({
   selectedClip,
   timeline,
   analysis,
+  assemblyResult,
   onSeekToScene,
   onUpdateClipSpeed,
   onUpdateClipVolume,
@@ -19,17 +20,36 @@ export default function Inspector({
       {/* 1. Selected Clip Section */}
       <div className="bg-[#18191d] border border-[#23252b] rounded p-2.5 space-y-2.5">
         <div className="flex items-center justify-between text-[#d0d3dc] font-medium border-b border-[#212328] pb-1.5">
-          <span className="flex items-center gap-1.5">
-            <Film className="w-3.5 h-3.5 text-[#7c8190]" />
-            <span>{selectedClip ? selectedClip.name : 'No Clip Selected'}</span>
+          <span className="flex items-center gap-1.5 truncate max-w-[190px]">
+            <Film className="w-3.5 h-3.5 text-[#7c8190] shrink-0" />
+            <span className="truncate">{selectedClip ? selectedClip.name : 'No Clip Selected'}</span>
           </span>
-          <span className="text-[10px] text-[#636774] font-mono">
+          <span className="text-[10px] text-[#636774] font-mono shrink-0">
             {selectedClip ? selectedClip.id : ''}
           </span>
         </div>
 
         {selectedClip ? (
           <div className="space-y-2 font-mono text-[10px]">
+            {/* Source filename and role */}
+            {selectedClip.source_filename && (
+              <div className="flex justify-between text-[#858a98]">
+                <span>Source Media:</span>
+                <span className="text-[#a8adb8] truncate max-w-[150px]" title={selectedClip.source_filename}>
+                  {selectedClip.source_filename}
+                </span>
+              </div>
+            )}
+
+            {selectedClip.role && (
+              <div className="flex justify-between text-[#858a98]">
+                <span>AI Role:</span>
+                <span className="text-[#7ea5dc] font-medium px-1 py-0.2 rounded bg-[#1e2634] border border-[#27354a]">
+                  {selectedClip.role}
+                </span>
+              </div>
+            )}
+
             <div className="flex justify-between text-[#858a98]">
               <span>Timeline:</span>
               <span className="text-[#c4c7d2]">
@@ -46,6 +66,23 @@ export default function Inspector({
               <span>Duration:</span>
               <span className="text-[#c4c7d2] font-semibold">{selectedClip.duration.toFixed(2)}s</span>
             </div>
+
+            {/* AI Editorial Rationale if present */}
+            {selectedClip.editorial_rationale && (
+              <div className="pt-2 border-t border-[#212328] font-sans">
+                <span className="text-[#858a98] text-[10px] font-medium block mb-1">
+                  Editorial Rationale:
+                </span>
+                <p className="text-[#b5b9c4] text-[10px] leading-relaxed bg-[#1b1d22] p-2 rounded border border-[#272932]">
+                  {selectedClip.editorial_rationale}
+                </p>
+                {selectedClip.trimmed_reason && (
+                  <p className="text-[9px] text-[#787d8c] italic mt-1 pl-1">
+                    • {selectedClip.trimmed_reason}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* Playback Speed Slider */}
             <div className="pt-1.5 border-t border-[#212328]">
@@ -71,7 +108,44 @@ export default function Inspector({
         )}
       </div>
 
-      {/* 2. Detected Scenes List (if video has been analyzed) */}
+      {/* 2. Assembled Sequence Storyboard (if sequence was assembled) */}
+      {assemblyResult && assemblyResult.segments && (
+        <div className="bg-[#18191d] border border-[#23252b] rounded p-2.5 space-y-2">
+          <div className="flex items-center justify-between text-[#d0d3dc] font-medium border-b border-[#212328] pb-1.5">
+            <span className="flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#d48b3b]" />
+              <span>Production Storyboard</span>
+            </span>
+            <span className="text-[10px] text-[#8a8f9e] font-mono">
+              {assemblyResult.segments.length} cuts
+            </span>
+          </div>
+
+          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+            {assemblyResult.segments.map((seg, idx) => (
+              <div
+                key={idx}
+                onClick={() => onSeekToScene(seg.timeline_start, seg.timeline_end)}
+                className="bg-[#1e2025] hover:bg-[#252830] border border-[#282a32] rounded p-1.5 cursor-pointer transition space-y-0.5"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[#d0d3dc] font-medium text-[10px]">
+                    {idx + 1}. {seg.role}
+                  </span>
+                  <span className="text-[9px] font-mono text-[#8a8f9e]">
+                    {seg.duration.toFixed(1)}s
+                  </span>
+                </div>
+                <p className="text-[9px] text-[#717684] truncate">
+                  {seg.source_filename}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 3. Detected Scenes List (if video has been analyzed) */}
       <div className="bg-[#18191d] border border-[#23252b] rounded p-2.5 space-y-2">
         <div className="flex items-center justify-between text-[#d0d3dc] font-medium border-b border-[#212328] pb-1.5">
           <span className="flex items-center gap-1.5">

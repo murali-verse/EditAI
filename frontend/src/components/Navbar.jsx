@@ -7,7 +7,8 @@ import {
   Sliders,
   Sparkles,
   Maximize,
-  Volume2
+  Volume2,
+  Layers
 } from 'lucide-react';
 
 export default function Navbar({
@@ -18,6 +19,7 @@ export default function Navbar({
   onAnalyze,
   isAnalyzing,
   onOpenExport,
+  onOpenAssemblyStage,
   onLoadSample,
   hasMedia,
   activeRightTab,
@@ -114,6 +116,15 @@ export default function Navbar({
 
         {/* Right action toggles: Quick Export, Full Screen, Mixer, Inspector, AI Assistant */}
         <div className="flex items-center gap-1.5 text-[11px]">
+          <button
+            onClick={onOpenAssemblyStage}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#202834] hover:bg-[#283546] text-[#b8cde8] border border-[#344b68] transition"
+            title="Open AI Multi-Video Assembly Studio"
+          >
+            <Layers className="w-3 h-3 text-[#7ea5dc]" />
+            <span>AI Auto-Assemble</span>
+          </button>
+
           <button
             onClick={onAnalyze}
             disabled={!hasMedia || isAnalyzing}

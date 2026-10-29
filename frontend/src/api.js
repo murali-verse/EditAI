@@ -40,6 +40,43 @@ export async function autosaveProject(projectId, payload) {
 }
 
 // Media Upload APIs
+export async function uploadBatchVideos(files) {
+  const formData = new FormData();
+  for (let i = 0; i < files.length; i++) {
+    formData.append("files", files[i]);
+  }
+  const res = await fetch(`${API_BASE}/api/media/upload/batch`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Batch upload failed" }));
+    throw new Error(err.detail || "Batch upload failed");
+  }
+  return res.json();
+}
+
+export async function loadMultiSamplePack() {
+  const res = await fetch(`${API_BASE}/api/assembly/sample-pack`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error("Failed to load multi-clip sample pack");
+  return res.json();
+}
+
+export async function analyzeAndAssembleProduction(payload) {
+  const res = await fetch(`${API_BASE}/api/assembly/analyze-and-assemble`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: "Assembly failed" }));
+    throw new Error(err.detail || "Assembly failed");
+  }
+  return res.json();
+}
+
 export async function uploadVideo(file) {
   const formData = new FormData();
   formData.append("file", file);
@@ -116,6 +153,16 @@ export async function sendChatbotCommand(payload) {
     throw new Error(err.detail || "Chatbot command failed");
   }
   return res.json();
+}
+
+export async function getLLMProviders() {
+  try {
+    const res = await fetch(`${API_BASE}/api/chatbot/providers`);
+    if (!res.ok) return { active_engine: "Semantic NLP" };
+    return res.json();
+  } catch (e) {
+    return { active_engine: "Semantic NLP" };
+  }
 }
 
 // Timeline APIs
