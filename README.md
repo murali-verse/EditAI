@@ -37,6 +37,56 @@ The user interface reproduces the clean, matte, subtle aesthetic of professional
 
 ---
 
+## 🎬 Native DaVinci Resolve 21 Integrated AI Chatbot
+
+EditMind AI provides a direct integration for **Blackmagic DaVinci Resolve 21**, embedding an AI-powered conversational chatbot directly inside the official DaVinci Resolve workstation.
+
+### In-App DaVinci Resolve Chatbot (Native Window)
+The script uses DaVinci Resolve's native `fusion.UIManager` and `bmd.UIDispatcher`, rendering a dark-themed AI co-pilot window directly inside the application:
+1. Open **DaVinci Resolve 21**.
+2. Open or create any project.
+3. In the top application menu bar, navigate to:
+   ```
+   Workspace -> Scripts -> EditAI_Chatbot
+   ```
+4. The **EditAI Assistant** window opens instantly inside DaVinci Resolve with a live project status bar, quick action buttons, execution transcript, and prompt input box.
+
+### One-Click Desktop Companion
+You can also launch the floating desktop chatbot that connects to DaVinci Resolve over the local scripting IPC:
+- Simply run:
+  ```cmd
+  start_davinci_chatbot.bat
+  ```
+  *(Or run `python davinci_integration/EditAI_Desktop_Chatbot.py`)*
+
+### Supported Natural Language Commands inside DaVinci Resolve
+- **Workspace Page Switching**:
+  - *"Switch to edit page"*, *"Go to color grading"*, *"Open cut page"*, *"Switch to deliver"*
+- **Media Ingestion & Bins**:
+  - *"Import media C:/videos/interview.mp4"*, *"Import media into bin B-Roll"*, *"Create bin Music"*
+  - *"List all clips in media pool"*
+- **Timeline Creation & Sequencing**:
+  - *"Create a new timeline called Final Cut"*, *"Create timeline from clips"*, *"Add all clips to timeline"*
+  - *"Duplicate timeline as Version 2"*, *"Switch to timeline 1"*
+- **Timecode & Playhead Navigation**:
+  - *"Go to timecode 01:00:15:00"*, *"Seek to 10 seconds"*, *"Jump to beginning"*, *"Jump to end"*, *"Where is playhead"*
+- **Markers & Annotations**:
+  - *"Add a blue marker called Cut Here"*, *"Add red marker"*, *"Delete all markers"*
+- **Track Controls**:
+  - *"Add video track"*, *"Add audio track"*, *"Mute audio track 2"*, *"Lock video track 1"*
+- **Clip Color Labeling**:
+  - *"Color selected clip green"*, *"Label clip cyan"*
+- **DaVinci 21 AI Suite**:
+  - *"Enable voice isolation on audio track 1"* (DaVinci Neural Engine)
+  - *"Auto generate subtitles from audio"* (Automatic speech captions)
+  - *"Detect scene cuts"* (Timeline scene detection)
+- **Titles & Generators**:
+  - *"Insert title Introduction"*, *"Insert fusion composition"*
+- **Save & Render**:
+  - *"Save project"*, *"Export timeline to C:/exports/final.mp4"*, *"Start rendering"*
+
+---
+
 ## 🚀 Setup & Execution Instructions
 
 ### Prerequisites
